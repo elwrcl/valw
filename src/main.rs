@@ -1,6 +1,7 @@
 // Modules land before the CLI uses them; Task 11 removes this.
 #![allow(dead_code)]
 
+mod config;
 mod error;
 
 use clap::Parser;
