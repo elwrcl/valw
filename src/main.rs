@@ -2,7 +2,9 @@
 #![allow(dead_code)]
 
 mod config;
+mod detach;
 mod error;
+mod lock;
 mod log;
 
 use clap::Parser;
