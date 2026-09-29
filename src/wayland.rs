@@ -19,7 +19,7 @@ use smithay_client_toolkit::{
 use wayland_client::{
     Connection, EventQueue, QueueHandle,
     globals::{GlobalList, registry_queue_init},
-    protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface},
+    protocol::{wl_buffer::WlBuffer, wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface},
 };
 use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::WpCursorShapeDeviceV1;
 use wayland_protocols::wp::viewporter::client::{
@@ -27,6 +27,7 @@ use wayland_protocols::wp::viewporter::client::{
 };
 use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
 
+use crate::capture::Pending;
 use crate::error::HintExt;
 use crate::frame::OutputGeom;
 
@@ -58,6 +59,8 @@ pub struct State {
     pub cursor_device: Option<WpCursorShapeDeviceV1>,
     pub keyboard: Option<wl_keyboard::WlKeyboard>,
     pub pointer: Option<wl_pointer::WlPointer>,
+    /// Screencopy requests in flight.
+    pub captures: Vec<Pending>,
 }
 
 impl Wayland {
@@ -83,6 +86,7 @@ impl Wayland {
             cursor_device: None,
             keyboard: None,
             pointer: None,
+            captures: Vec::new(),
         };
         // Two round trips: one for wl_output, one for the xdg-output details.
         queue
@@ -425,3 +429,4 @@ smithay_client_toolkit::delegate_dispatch2!(State);
 wayland_client::delegate_noop!(State: ZwlrScreencopyManagerV1);
 wayland_client::delegate_noop!(State: WpViewporter);
 wayland_client::delegate_noop!(State: WpViewport);
+wayland_client::delegate_noop!(State: ignore WlBuffer);
