@@ -3,6 +3,7 @@
 
 mod config;
 mod error;
+mod log;
 
 use clap::Parser;
 
