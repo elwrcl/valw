@@ -7,6 +7,8 @@ mod error;
 mod frame;
 mod lock;
 mod log;
+mod render;
+mod selection;
 
 use clap::Parser;
 
