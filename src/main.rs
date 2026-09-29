@@ -7,6 +7,7 @@ mod error;
 mod frame;
 mod lock;
 mod log;
+mod output;
 mod render;
 mod selection;
 
