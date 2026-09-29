@@ -218,13 +218,20 @@ Every capture command runs these steps in order.
    names the protocol.
 5. **Capture.** `Capturer::capture(&[Output], cursor: bool) -> Vec<Frame>`
    issues one screencopy request per output in parallel and waits up to 5 s
-   for every `ready`. A `Frame` holds upright, opaque RGBA8 pixels at physical
-   resolution plus its output name and logical geometry; the scale is
-   `frame width / logical width`. `XRGB8888`, `ARGB8888`, `XBGR8888` and
-   `ABGR8888` are converted; `y_invert` is honoured; any other format is an
-   error that names the format. Alpha is always 255, even where the
-   compositor's buffer says 0. `cursor` comes from `--cursor` or
+   for every `ready`. A `Frame` holds upright pixels at physical resolution
+   in **B, G, R, X byte order** (XRGB8888 in memory, which is what niri
+   delivers), plus its output name and logical geometry; the scale is
+   `frame width / logical width`. `XRGB8888` and `ARGB8888` are copied
+   as-is, `XBGR8888` and `ABGR8888` get R and B swapped, `y_invert` is
+   honoured, and any other format is an error that names the format.
+   Conversion to RGBA happens only for what is saved (`Frame::to_rgba`,
+   after the overlay has closed), and alpha is then always 255, even where
+   the compositor's buffer says 0. `cursor` comes from `--cursor` or
    `capture.show_cursor`.
+   - **Why BGRX:** on the user's machine a full 1080p pass over the pixels
+     costs 5–10 ms. Converting to RGBA up front and back to ARGB for the
+     overlay put the first overlay frame at 270 ms. Keeping the native
+     order brought it to about 40 ms (headless 1080p, warm).
    - **niri quirk (verified in its source):** niri rejects a shm buffer
      with `invalid buffer` unless the whole `wl_shm_pool` is exactly the
      buffer's size. Every capture therefore gets its own pool.
@@ -251,9 +258,11 @@ output:
 
 - namespace `valw-overlay`, layer `Overlay`, anchored to all four edges,
   `exclusive_zone = -1`, `keyboard_interactivity = Exclusive`
-- background: that output's frozen frame, darkened by 40%
-- the selection area is copied from the undarkened frame and outlined with a
-  1 physical pixel white border
+- buffer format XRGB8888, the frame's own byte order, so nothing is
+  converted and alpha is ignored
+- background: that output's frozen frame, darkened by 40% (computed once)
+- the selection area is copied from the undarkened frame (shared, not
+  copied) and outlined with a 1 physical pixel white border
 - cursor shape: crosshair (`wp_cursor_shape`)
 
 Surfaces are owned by the process, so the compositor removes them if valw
