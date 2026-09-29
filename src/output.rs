@@ -60,6 +60,12 @@ pub fn encode_png(img: &RgbaImage) -> Result<Vec<u8>> {
 /// Writes via a temp file in the same directory and a rename, so a partial
 /// screenshot never appears under the final name.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    // Devices and pipes (`-o /dev/null`, a FIFO) can't be replaced by a
+    // rename, and there is no partial file to protect; write them directly.
+    if fs::metadata(path).is_ok_and(|m| !m.is_file() && !m.is_dir()) {
+        return fs::write(path, bytes)
+            .with_context(|| format!("could not write {}", path.display()));
+    }
     // "a.png" has the parent "", which means the current directory.
     let dir = match path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p,
@@ -190,6 +196,12 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), b"png");
         let names: Vec<_> = fs::read_dir(path.parent().unwrap()).unwrap().collect();
         assert_eq!(names.len(), 1);
+    }
+
+    #[test]
+    fn write_atomic_writes_devices_directly() {
+        // No temp file and rename for things that aren't regular files.
+        write_atomic(Path::new("/dev/null"), b"png").unwrap();
     }
 
     #[test]
