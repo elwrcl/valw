@@ -57,7 +57,9 @@
               ! grep -q '^fail' doctor.txt
 
               # Through a pipe: the clipboard child must not keep it open.
-              timeout 10 valw screen -o - | cat > shot.png
+              # The timeout covers the reader too; the child is in its own
+              # session, so bounding valw alone would not catch a leak.
+              timeout 10 sh -c 'valw screen -o - | cat > shot.png'
               file shot.png | tee file.txt
               grep -q 'PNG image data, 1280 x 720' file.txt
 
