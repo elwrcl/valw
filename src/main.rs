@@ -4,6 +4,7 @@
 mod config;
 mod detach;
 mod error;
+mod frame;
 mod lock;
 mod log;
 
