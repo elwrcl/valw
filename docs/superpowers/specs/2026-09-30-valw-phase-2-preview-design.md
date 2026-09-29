@@ -70,7 +70,7 @@ Unix stream socket, one JSON object per line in each direction
 
 | Request | Host action | Reply |
 |---|---|---|
-| `{"cmd":"hide"}` | Mark this connection as hiding; unmap all thumbnails if this is the first; Wayland round trip so the compositor has processed the unmap | `{"ok":true}` |
+| `{"cmd":"hide"}` | Mark this connection as hiding; if this is the first, hide all thumbnails (4.6); Wayland round trip so the compositor has processed it | `{"ok":true}` |
 | `{"cmd":"add","path":"…","output":"HDMI-A-1"}` | Load and downscale the PNG, add a thumbnail on that output | `{"ok":true}` |
 
 Any malformed or unknown request gets `{"ok":false,"error":"…"}` and the
@@ -97,6 +97,10 @@ calloop (SCTK's default `calloop` feature, `WaylandSource`), one loop for:
 - the listening socket and every client connection (line-buffered),
 - a timer per thumbnail (`timeout_secs`),
 - animation, paced by frame callbacks.
+
+After each dispatch the loop drops finished thumbnails, restacks the rest
+and checks the exit rule. A new host that nobody connects to within 2 s
+exits (the capture that started it died).
 
 ## 4. Thumbnail
 
@@ -153,6 +157,20 @@ One layer-shell surface per thumbnail:
   long region selection, older thumbnails may already be gone. Simplest
   rule; revisit after the test day if it annoys.
 
+### 4.6 Hiding
+
+A hidden thumbnail stays mapped: it commits a fully transparent buffer and
+an empty input region, so it is invisible in screenshots and clicks pass
+through. Showing it again restores the image and the input region.
+
+Unmapping (attaching no buffer) is not used. Verified on niri 26.04 while
+prototyping: after an unmap, a commit without a buffer gets no new
+configure, so the thumbnail never came back and the host never exited.
+
+Hide and show are drawn immediately, even while a frame callback is
+pending mid-animation; otherwise a moving thumbnail could still be on
+screen when the capture starts.
+
 ## 5. Capture integration
 
 In `main.rs`'s capture flow:
@@ -167,7 +185,12 @@ In `main.rs`'s capture flow:
    `add` over the guard's connection, or, without a running host, start one
    (3.1) and send `add` there.
 4. Drop the guard: the connection closes and the stack shows again, the new
-   thumbnail sliding in.
+   thumbnail sliding in. This must happen **before** the clipboard fork: the
+   forked clipboard server would otherwise inherit the connection and keep
+   the thumbnails hidden until the clipboard changes.
+
+`deliver` is split accordingly: `save` writes the files and returns the path
+to preview; the clipboard copy happens after the guard is dropped.
 
 Cost: one extra round trip before screencopy, only when a host is running.
 
@@ -193,10 +216,15 @@ Flat files, pure logic kept separate:
 | `src/host.rs` | Host entry point, lock, socket server, calloop loop, hide counter |
 | `src/thumbnail.rs` | One thumbnail: surface, drawing, animation state, pointer handling |
 
-`wayland.rs` gains what the host needs (a calloop-based dispatch path and
-routing of pointer/frame/configure events to thumbnails), following the
-existing `overlay` pattern. `main.rs` gains the hidden `__preview-host`
-subcommand and the capture integration.
+`wayland.rs` gains what the host needs, following the existing `overlay`
+pattern: a `preview: Option<Host>` field on `State`, routing of
+pointer/frame/configure/closed events to it, `State::output_list()` (so the
+host can look up outputs from inside the event loop), and an `Output::scale`
+field (physical / logical width, from the current mode). `main.rs` gains the
+hidden `__preview-host` subcommand and the capture integration.
+
+The existing config test that used `[preview]` as its example of an unknown
+key switches to `[zoom]` (unknown keys are reported in alphabetical order).
 
 New dependency: `serde_json`. calloop comes with SCTK's default features.
 
@@ -251,14 +279,16 @@ In the separate `~/copland` repo, done with the user's go-ahead:
 
 ### 10.2 Headless sway check (`nix flake check`)
 
-The headless background is a solid colour, which makes these deterministic:
+The headless background is solid black (no swaybg in the sandbox), which
+makes these deterministic. Config: `timeout_secs = 2`.
 
 1. `valw screen` with default target → `valw.sock` appears within 1 s.
-2. While the thumbnail is visible, `valw screen -o -` → the bottom-right
-   300×200 px of the PNG is entirely the background colour (thumbnails
-   never end up in screenshots).
-3. With `timeout_secs = 1`, the socket is gone within 3 s (host exits).
-4. `--no-preview` → no socket appears.
+2. After 0.5 s, `grim` sees more than one colour in the bottom-right
+   300×200 px (the thumbnail is really there, so step 3 isn't vacuous).
+3. Immediately after, `valw screen --no-preview -o hidden.png` → that corner
+   is a single colour (thumbnails never end up in screenshots).
+4. The socket is gone within 4 s (host exits after the timeout).
+5. `--no-preview` → no socket appears.
 
 Click and swipe need real pointer input and stay manual.
 
