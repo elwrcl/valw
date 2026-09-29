@@ -1,0 +1,11 @@
+/*
+!/.gitignore
+!/.envrc
+!/flake.nix
+!/flake.lock
+!/Cargo.toml
+!/Cargo.lock
+!/nix/
+!/src/
+!/docs/
+!/README.md
