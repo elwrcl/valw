@@ -1,6 +1,3 @@
-// Modules land before the CLI uses them; Task 11 removes this.
-#![allow(dead_code)]
-
 mod capture;
 mod config;
 mod detach;
@@ -11,6 +8,7 @@ mod lock;
 mod log;
 mod niri;
 mod output;
+mod region;
 mod render;
 mod selection;
 mod wayland;
@@ -48,6 +46,11 @@ enum Command {
         #[command(flatten)]
         common: Common,
     },
+    /// Drag to select a region (Cmd+Shift+4).
+    Region {
+        #[command(flatten)]
+        common: Common,
+    },
     /// Report what the compositor and system support.
     Doctor,
 }
@@ -76,6 +79,7 @@ fn parse_delay(s: &str) -> Result<Duration, String> {
 
 enum Mode {
     Screen { all: bool },
+    Region,
 }
 
 fn main() -> ExitCode {
@@ -106,6 +110,7 @@ fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Doctor => doctor::run(),
         Command::Screen { all, common } => capture(Mode::Screen { all }, common),
+        Command::Region { common } => capture(Mode::Region, common),
     }
 }
 
@@ -138,6 +143,11 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
                 let frame = wl.capture(&outputs[focused..=focused], cursor)?.remove(0);
                 (vec![(frame.to_rgba(frame.full()), None)], 0)
             }
+        }
+        Mode::Region => {
+            let frames = wl.capture(&outputs, cursor)?;
+            let (i, r) = region::select(&mut wl, &outputs, &frames)?;
+            (vec![(frames[i].to_rgba(r), None)], 0)
         }
     };
     drop(wl);
@@ -224,10 +234,10 @@ mod tests {
     fn flag_conflicts() {
         assert!(parses(&["screen", "--all"]));
         assert!(parses(&["screen", "-o", "-"]));
-        assert!(parses(&["screen", "--clipboard-only", "--cursor"]));
+        assert!(parses(&["region", "--clipboard-only", "--cursor"]));
         assert!(!parses(&["screen", "--all", "-o", "-"]));
         assert!(!parses(&["screen", "--all", "--clipboard-only"]));
-        assert!(!parses(&["screen", "--clipboard-only", "-o", "a.png"]));
+        assert!(!parses(&["region", "--clipboard-only", "-o", "a.png"]));
     }
 
     #[test]

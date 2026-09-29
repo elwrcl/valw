@@ -30,6 +30,7 @@ use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::Z
 use crate::capture::Pending;
 use crate::error::HintExt;
 use crate::frame::OutputGeom;
+use crate::region::Overlay;
 
 /// An output as valw sees it.
 #[derive(Debug, Clone)]
@@ -61,6 +62,8 @@ pub struct State {
     pub pointer: Option<wl_pointer::WlPointer>,
     /// Screencopy requests in flight.
     pub captures: Vec<Pending>,
+    /// The region selection overlay, while it is open.
+    pub overlay: Option<Overlay>,
 }
 
 impl Wayland {
@@ -87,6 +90,7 @@ impl Wayland {
             keyboard: None,
             pointer: None,
             captures: Vec::new(),
+            overlay: None,
         };
         // Two round trips: one for wl_output, one for the xdg-output details.
         queue
@@ -233,7 +237,17 @@ impl CompositorHandler for State {
     ) {
     }
 
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {}
+    fn frame(
+        &mut self,
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+        surface: &wl_surface::WlSurface,
+        _: u32,
+    ) {
+        if let Some(overlay) = &mut self.overlay {
+            overlay.frame_done(surface, qh);
+        }
+    }
 
     fn surface_enter(
         &mut self,
@@ -267,16 +281,23 @@ impl OutputHandler for State {
 }
 
 impl LayerShellHandler for State {
-    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &LayerSurface) {}
+    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &LayerSurface) {
+        if let Some(overlay) = &mut self.overlay {
+            overlay.cancel();
+        }
+    }
 
     fn configure(
         &mut self,
         _: &Connection,
-        _: &QueueHandle<Self>,
-        _: &LayerSurface,
-        _: LayerSurfaceConfigure,
+        qh: &QueueHandle<Self>,
+        layer: &LayerSurface,
+        configure: LayerSurfaceConfigure,
         _: u32,
     ) {
+        if let Some(overlay) = &mut self.overlay {
+            overlay.configure(layer, configure.new_size, qh);
+        }
     }
 }
 
@@ -363,8 +384,13 @@ impl KeyboardHandler for State {
         _: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
         _: u32,
-        _: KeyEvent,
+        event: KeyEvent,
     ) {
+        if event.keysym == Keysym::Escape
+            && let Some(overlay) = &mut self.overlay
+        {
+            overlay.cancel();
+        }
     }
 
     fn repeat_key(
@@ -404,10 +430,13 @@ impl PointerHandler for State {
     fn pointer_frame(
         &mut self,
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
         _: &wl_pointer::WlPointer,
-        _: &[PointerEvent],
+        events: &[PointerEvent],
     ) {
+        if let Some(overlay) = &mut self.overlay {
+            overlay.pointer(events, self.cursor_device.as_ref(), qh);
+        }
     }
 }
 
