@@ -4,6 +4,7 @@ use std::path::Path;
 use anyhow::{Result, bail};
 
 use crate::config;
+use crate::error::one_line;
 use crate::niri;
 use crate::wayland::Wayland;
 
@@ -96,7 +97,10 @@ pub fn check_niri(version: Result<String>) -> Check {
     match version {
         Err(e) => check(
             Level::Warn,
-            format!("niri IPC unavailable ({e:#}); using the first output for `screen`"),
+            format!(
+                "niri IPC unavailable ({}); using the first output for `screen`",
+                one_line(&e)
+            ),
         ),
         Ok(v) => match niri::parse_version(&v) {
             Some(found) if found == niri::IPC_VERSION => check(Level::Ok, format!("niri {v}")),
@@ -117,7 +121,7 @@ pub fn check_config(path: &Path) -> Check {
             Level::Ok,
             format!("config {} not found, using defaults", path.display()),
         ),
-        Err(e) => check(Level::Fail, format!("config: {e:#}")),
+        Err(e) => check(Level::Fail, format!("config: {}", one_line(&e))),
     }
 }
 
@@ -155,7 +159,7 @@ pub fn run() -> Result<()> {
                 ));
             }
         }
-        Err(e) => checks.push(check(Level::Fail, format!("wayland: {e:#}"))),
+        Err(e) => checks.push(check(Level::Fail, format!("wayland: {}", one_line(&e)))),
     }
     checks.push(check_niri(niri::version()));
     let config_path = config::default_path();
@@ -243,6 +247,26 @@ mod tests {
         assert_eq!(
             check_niri(Err(anyhow::anyhow!("no socket"))).level,
             Level::Warn
+        );
+    }
+
+    #[test]
+    fn broken_config_fails_with_hint_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[save]\ndirectory = \n").unwrap();
+        let c = check_config(&path);
+        assert_eq!(c.level, Level::Fail);
+        assert!(
+            c.text.starts_with("config: invalid config file"),
+            "{}",
+            c.text
+        );
+        assert!(
+            c.text
+                .ends_with("(hint: fix the file or delete it to use the defaults)"),
+            "{}",
+            c.text
         );
     }
 

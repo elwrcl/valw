@@ -58,6 +58,22 @@ pub fn render(err: &anyhow::Error, log: Option<&Path>) -> String {
     out
 }
 
+/// The error on one line, hint last: `msg: cause (hint: ...)`. For places
+/// that list several results, like `valw doctor`.
+pub fn one_line(err: &anyhow::Error) -> String {
+    let hint = err.downcast_ref::<Hint>().map(|h| h.0.as_str());
+    let messages: Vec<String> = err
+        .chain()
+        .map(|e| e.to_string())
+        .filter(|m| Some(m.as_str()) != hint)
+        .collect();
+    let mut out = messages.join(": ");
+    if let Some(hint) = hint {
+        out.push_str(&format!(" (hint: {hint})"));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,6 +114,19 @@ mod tests {
             render(&err, None),
             "error: valw is already running\n\
              \x20 hint:  wait for the other capture to finish\n"
+        );
+    }
+
+    #[test]
+    fn one_line_puts_hint_last() {
+        let err = Err::<(), _>(anyhow!("Could not find wayland compositor"))
+            .context("could not connect to the Wayland compositor")
+            .hint("valw needs a Wayland session; is WAYLAND_DISPLAY set?")
+            .unwrap_err();
+        assert_eq!(
+            one_line(&err),
+            "could not connect to the Wayland compositor: Could not find wayland compositor \
+             (hint: valw needs a Wayland session; is WAYLAND_DISPLAY set?)"
         );
     }
 
