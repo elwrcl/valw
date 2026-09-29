@@ -91,18 +91,23 @@ src/
   error.rs             # user-facing error type and rendering
   log.rs               # tracing setup, per-run log files
   lock.rs              # single-instance lock
+  detach.rs            # fork a background child (clipboard server)
   wayland.rs           # SCTK state: registry, outputs, seat, shm
+  frame.rs             # Frame type, pixel format conversion, transforms
   capture.rs           # Capturer trait + wlr-screencopy implementation
-  niri.rs              # niri IPC wrapper (focused output)
-  region.rs            # region selection overlay + state machine
-  render.rs            # tiny-skia helpers
+  niri.rs              # niri IPC wrapper (focused output, version)
+  selection.rs         # selection state machine, logical → pixel math
+  region.rs            # region selection overlay (layer-shell surfaces)
+  render.rs            # overlay pixels: dim, paste selection, outline
   output.rs            # PNG saving, filename template, clipboard
   doctor.rs            # `valw doctor`
 docs/
 ```
 
 Files stay flat for now; `overlay/` and `editor/` subdirectories appear once
-Phases 3 to 5 give them enough content.
+Phases 3 to 5 give them enough content. Pure logic (`frame`, `selection`,
+`render`, `output`, `config`, `error`) is kept apart from Wayland code so it
+can be unit tested without a compositor.
 
 ### 4.1 Nix
 
@@ -179,16 +184,23 @@ is incomplete.
 | Purpose | Crate |
 |---|---|
 | Wayland client | `smithay-client-toolkit`, `wayland-client`, `wayland-protocols`, `wayland-protocols-wlr` |
-| Drawing | `tiny-skia` |
 | PNG | `image` (png feature only) |
 | Clipboard | `wl-clipboard-rs` |
-| niri IPC | `niri-ipc` (version pinned to match niri 26.04) |
+| niri IPC | `niri-ipc` (`=26.4.0`, matches niri 26.04) |
 | CLI | `clap` (derive) |
 | Config | `serde`, `toml`, `serde_ignored` |
 | Time / filenames | `chrono` |
 | Errors | `anyhow` |
-| Logging | `tracing`, `tracing-subscriber`, `tracing-appender` |
-| Lock | `rustix` (flock) |
+| Logging | `tracing`, `tracing-subscriber` |
+| Lock, poll, stdio | `rustix` |
+| fork | `libc` |
+
+Not needed in Phase 1: `tiny-skia` (the overlay is plain byte copies; shapes
+and text arrive in Phase 3) and `tracing-appender` (one file per run needs no
+rolling writer).
+
+Dependencies are built with `opt-level = 3` in the dev profile; unoptimised
+PNG encoding is too slow to test with.
 
 ## 6. Capture pipeline
 
@@ -205,12 +217,20 @@ Every capture command runs these steps in order.
    screencopy and layer-shell. A missing required global is an error that
    names the protocol.
 5. **Capture.** `Capturer::capture(&[Output], cursor: bool) -> Vec<Frame>`
-   issues one screencopy request per output in parallel and waits for every
-   `ready`. A `Frame` holds RGBA8 pixels at physical resolution plus its output
-   name, logical geometry and scale. `XRGB8888`, `ARGB8888`, `XBGR8888` and
+   issues one screencopy request per output in parallel and waits up to 5 s
+   for every `ready`. A `Frame` holds upright, opaque RGBA8 pixels at physical
+   resolution plus its output name and logical geometry; the scale is
+   `frame width / logical width`. `XRGB8888`, `ARGB8888`, `XBGR8888` and
    `ABGR8888` are converted; `y_invert` is honoured; any other format is an
-   error that names the format. `cursor` comes from `--cursor` or
+   error that names the format. Alpha is always 255, even where the
+   compositor's buffer says 0. `cursor` comes from `--cursor` or
    `capture.show_cursor`.
+   - **niri quirk (verified in its source):** niri rejects a shm buffer
+     with `invalid buffer` unless the whole `wl_shm_pool` is exactly the
+     buffer's size. Every capture therefore gets its own pool.
+   - **Rotated outputs:** the buffer arrives in the output's native
+     orientation. It is turned upright the way grim does it: y-invert,
+     rotate clockwise by the transform's angle, then mirror if flipped.
 
 ### 6.1 `valw screen`
 
@@ -241,10 +261,11 @@ dies. No overlay can outlive the process.
 
 ### 7.2 HiDPI
 
-- Each surface asks for its preferred scale via `wp_fractional_scale`. The
-  buffer is allocated at physical size, and `wp_viewporter` sets the
-  destination to the logical size. The frozen frame is shown 1:1 with no
-  resampling.
+- Each surface's buffer is the frozen frame's size (physical pixels), and
+  `wp_viewporter` sets the destination to the logical size from the layer
+  configure. The frame is shown 1:1 with no resampling. The frame already
+  says how many physical pixels the output has, so `wp_fractional_scale` is
+  not needed.
 - Pointer events arrive in surface-local logical coordinates. They are
   converted to global logical coordinates by adding the output's logical
   position; the selection is stored in global logical coordinates.
@@ -267,8 +288,9 @@ Idle --press--> Dragging{start} --release--> Done(rect)
 
 ### 7.4 Logical to physical conversion
 
-For an output at logical position `(ox, oy)` with scale `s` and a selection
-`(x, y, w, h)` in global logical coordinates:
+For an output at logical position `(ox, oy)` with scale `s` (per axis:
+frame size / logical size) and a selection `(x, y, w, h)` in global logical
+coordinates:
 
 ```
 x0 = floor((x - ox) * s)       y0 = floor((y - oy) * s)
@@ -312,10 +334,22 @@ show_cursor = false
 
 ### 8.3 Clipboard
 
-`wl-clipboard-rs` copies the PNG as `image/png` and forks into the background
-to serve paste requests. The forked child would inherit the lock file
-descriptor and keep the lock held, so **the lock is released explicitly before
-copying**. A test covers this.
+A Wayland clipboard needs a process that stays alive to answer paste
+requests. `wl-clipboard-rs` does **not** fork: its background mode serves from
+a thread, which dies when valw exits. So valw does what `wl-copy` does:
+
+1. `Options::foreground(true).prepare_copy(...)` offers the PNG as
+   `image/png` (no threads are started).
+2. `detach::spawn` releases the capture lock, then forks. The child calls
+   `setsid`, points stdin/stdout/stderr at `/dev/null`, serves paste requests
+   until something else is copied, and exits with `_exit`.
+3. The parent exits right away.
+
+The lock is released before the fork because the child would otherwise
+inherit it and block the next capture. stdio goes to `/dev/null` because an
+inherited stdout pipe would keep `valw region -o - | consumer` waiting until
+the clipboard changes. A unit test covers both, and the headless test runs
+`screen -o -` through a pipe.
 
 ### 8.4 CLI
 
@@ -326,15 +360,16 @@ valw doctor
 
 COMMON:
   --clipboard-only   copy to clipboard, do not save a file
-  --output <path>    write to this path instead of directory + template;
-                     "-" writes PNG to stdout (not allowed with --all)
-  --delay <secs>     wait before capturing
+  -o, --output <path>  write to this path instead of directory + template;
+                       "-" writes PNG to stdout
+  --delay <secs>     wait before capturing (non-negative, fractions allowed)
   --cursor           include the cursor in the capture
 ```
 
-Flag interactions:
+Flag interactions (enforced by clap, so they are usage errors, exit 2):
 
-- `--clipboard-only` conflicts with `--output` and `--all`.
+- `--clipboard-only` conflicts with `--output`.
+- `--all` conflicts with `--output` and `--clipboard-only`.
 - Otherwise the clipboard follows `save.copy_to_clipboard`, whatever the
   output target (including `--output -`).
 - `--clipboard-only` copies even if `save.copy_to_clipboard = false`.
@@ -372,13 +407,19 @@ error: could not capture output HDMI-A-1
 
 - `tracing` writes one file per run to `$XDG_STATE_HOME/valw/logs/`; the 10
   most recent are kept.
-- Each log starts with an environment summary: valw version, niri version,
-  bound globals and their versions, outputs (name, position, size, scale), and
-  the buffer formats screencopy offered.
+- Each log starts with an environment summary: valw version and arguments,
+  niri version, all globals and their versions (one line), outputs (name,
+  position, size, transform). Each capture logs the buffer formats offered
+  and the one used, and how long capturing took.
+- `region` logs the time from process start to the first overlay commit, and
+  the selected rectangle in both logical and pixel coordinates.
 - The default level is `info`; `VALW_LOG=debug` (EnvFilter syntax) raises it.
-- stderr gets warnings and errors. Processes spawned by niri log stderr to
-  niri's journal (`journalctl --user -u niri`), but the log file is the
+- stderr gets warnings from tracing (with colour only on a terminal) and
+  errors in the three-part format above. Processes spawned by niri log stderr
+  to niri's journal (`journalctl --user -u niri`), but the log file is the
   primary record.
+- If the log directory can't be written, valw keeps working and logs to
+  stderr only; a broken log dir must not block a screenshot.
 
 ### 9.3 Panics
 
@@ -390,10 +431,10 @@ same three-part format to stderr, with "this is a bug in valw" as the hint.
 Prints one `ok` / `warn` / `fail` line per check and exits 1 if any check
 fails:
 
-- required globals present with a sufficient version (screencopy, layer-shell,
-  xdg-output, shm, seat), optional ones reported (fractional-scale, viewporter,
-  cursor-shape, data-control)
-- outputs with position, size and scale
+- required globals present with a sufficient version (compositor, shm, seat,
+  xdg-output v2, layer-shell, screencopy, viewporter); optional ones warn
+  when missing (cursor-shape, ext/wlr data-control)
+- outputs with name, logical size, position and transform
 - niri IPC reachable, and niri's version compatible with the pinned `niri-ipc`
 - config file parses
 - save directory is writable
@@ -417,17 +458,21 @@ Wayland-independent logic lives in pure functions:
   format error
 - filename template, collision suffix, `--output -`
 - config: defaults when missing, unknown key warning, invalid TOML line number
-- lock: acquire, busy error, forked child does not hold the lock
-- error rendering: snapshot of the three-part output
+- lock: acquire, busy error; forked child holds neither the lock nor stdout
+- output transforms (all eight) against grim's rules
+- error rendering: exact text of the three-part output
+- `niri-ipc` pin in Cargo.toml matches `niri::IPC_VERSION`
 
 ### 10.2 Headless integration test (`nix flake check`)
 
-A check starts **sway** with `WLR_BACKENDS=headless` and
-`WLR_RENDERER=pixman` inside the build sandbox, then:
+A check starts **sway** (`sway-unwrapped`; the wrapped one needs D-Bus) with
+`WLR_BACKENDS=headless` and `WLR_RENDERER=pixman` inside the build sandbox,
+then:
 
 - runs `valw doctor` and asserts no `fail` lines
-- runs `valw screen -o -` and asserts the PNG size equals the headless
-  output's size
+- runs `valw screen -o - | cat` under a 10 s timeout (so a clipboard child
+  holding the pipe fails the check) and asserts the PNG is 1280×720, the
+  headless output's size
 
 This exercises the real screencopy path on every build. It runs on wlroots,
 not niri. `region` is not covered because it needs synthetic pointer input.
@@ -443,6 +488,8 @@ not niri. `region` is not covered because it needs synthetic pointer input.
 - **No stuck overlay:** `kill -9` during selection; the overlay disappears and
   the next run gets the lock.
 - **Noctalia:** the overlay covers the bar.
+- **Rotated output:** `niri msg output HDMI-A-1 transform 90`, then
+  `valw screen` and `grim -o HDMI-A-1` must match pixel for pixel.
 
 ## 11. Phase 0 exit criteria
 
