@@ -1,3 +1,6 @@
+// Phase 2 modules land before the CLI uses them; Task 6 removes this.
+#![allow(dead_code)]
+
 mod capture;
 mod config;
 mod detach;

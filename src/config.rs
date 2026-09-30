@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::error::HintExt;
@@ -10,6 +10,7 @@ use crate::error::HintExt;
 pub struct Config {
     pub save: Save,
     pub capture: Capture,
+    pub preview: Preview,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -24,6 +25,22 @@ pub struct Save {
 #[serde(default)]
 pub struct Capture {
     pub show_cursor: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct Preview {
+    pub enabled: bool,
+    pub timeout_secs: u64,
+}
+
+impl Default for Preview {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            timeout_secs: 5,
+        }
+    }
 }
 
 impl Default for Save {
@@ -77,7 +94,10 @@ pub fn load(path: &Path) -> Result<Config> {
 pub fn parse(text: &str) -> Result<(Config, Vec<String>)> {
     let de = toml::Deserializer::parse(text)?;
     let mut unknown = Vec::new();
-    let config = serde_ignored::deserialize(de, |path| unknown.push(path.to_string()))?;
+    let config: Config = serde_ignored::deserialize(de, |path| unknown.push(path.to_string()))?;
+    if config.preview.timeout_secs == 0 {
+        bail!("preview.timeout_secs must be at least 1");
+    }
     Ok((config, unknown))
 }
 
@@ -114,13 +134,10 @@ mod tests {
 
     #[test]
     fn unknown_keys_are_reported_not_rejected() {
-        let text = "[preview]\nenabled = true\n\n[save]\nfolder = \"x\"\n";
+        let text = "[zoom]\nscroll_step = 1.15\n\n[save]\nfolder = \"x\"\n";
         let (config, unknown) = parse(text).unwrap();
         assert_eq!(config, Config::default());
-        assert_eq!(
-            unknown,
-            vec!["preview".to_string(), "save.folder".to_string()]
-        );
+        assert_eq!(unknown, vec!["save.folder".to_string(), "zoom".to_string()]);
     }
 
     #[test]
@@ -132,6 +149,27 @@ mod tests {
     #[test]
     fn wrong_type_is_an_error() {
         assert!(parse("[capture]\nshow_cursor = \"yes\"\n").is_err());
+    }
+
+    #[test]
+    fn preview_defaults_and_overrides() {
+        assert_eq!(
+            Config::default().preview,
+            Preview {
+                enabled: true,
+                timeout_secs: 5
+            }
+        );
+        let (config, _) = parse("[preview]\ntimeout_secs = 2\n").unwrap();
+        assert!(config.preview.enabled);
+        assert_eq!(config.preview.timeout_secs, 2);
+    }
+
+    #[test]
+    fn preview_timeout_must_be_positive() {
+        let err = parse("[preview]\ntimeout_secs = 0\n").unwrap_err();
+        assert_eq!(err.to_string(), "preview.timeout_secs must be at least 1");
+        assert!(parse("[preview]\ntimeout_secs = -3\n").is_err());
     }
 
     #[test]
