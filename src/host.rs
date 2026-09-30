@@ -341,9 +341,7 @@ fn handle(state: &mut State, id: u64, request: Request) -> Reply {
 }
 
 fn add(state: &mut State, path: &Path, output_name: &str) -> Result<()> {
-    let image = image::open(path)
-        .with_context(|| format!("could not read {}", path.display()))?
-        .to_rgba8();
+    let image = crate::thumbnail::load(path)?;
     let outputs = state.output_list();
     let output = outputs
         .iter()

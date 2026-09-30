@@ -1,6 +1,6 @@
 //! One preview thumbnail: its layer surface, pixels, animation and gestures.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -28,6 +28,18 @@ pub const NAMESPACE: &str = "valw-preview";
 
 /// Premultiplied BGRA of the 1 px border: #e0e0e0 at 80% opacity.
 const BORDER: [u8; 4] = [179, 179, 179, 204];
+
+/// Loads the screenshot a thumbnail shows. The format comes from the file's
+/// contents, not its name: save.filename and -o needn't end in .png.
+pub fn load(path: &Path) -> Result<RgbaImage> {
+    let read = || -> Result<RgbaImage> {
+        Ok(image::ImageReader::open(path)?
+            .with_guessed_format()?
+            .decode()?
+            .to_rgba8())
+    };
+    read().with_context(|| format!("could not read {}", path.display()))
+}
 
 /// The thumbnail image for `img` on an output with `scale` physical pixels
 /// per logical pixel: returns the physical-size image and its logical size.
@@ -371,6 +383,16 @@ fn canvas_width(image_width: u32, scale: f64) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loads_png_without_extension() {
+        // save.filename and -o don't have to end in .png; the bytes always are PNG.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shot");
+        let img = RgbaImage::from_pixel(3, 2, image::Rgba([1, 2, 3, 255]));
+        std::fs::write(&path, crate::output::encode_png(&img).unwrap()).unwrap();
+        assert_eq!(load(&path).unwrap(), img);
+    }
 
     #[test]
     fn downscale_fits_long_edge_at_scale_one() {
