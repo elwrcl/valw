@@ -205,7 +205,7 @@ impl Thumbnail {
 
     /// The slide-out has finished (or is invisible anyway).
     pub fn is_finished(&self) -> bool {
-        self.closing && (self.anim.is_none() || self.hidden)
+        self.closing && (self.hidden || anim_over(self.anim, Instant::now()))
     }
 
     /// Makes the thumbnail invisible and click-through. The surface stays
@@ -370,6 +370,15 @@ impl Drop for Thumbnail {
     }
 }
 
+/// Whether `anim` has run its full course by `now`; no animation counts as
+/// over. Judged by the clock, not by frames: a compositor that stops sending
+/// frame callbacks (monitor asleep) must not keep a thumbnail alive.
+fn anim_over(anim: Option<(Anim, Instant)>, now: Instant) -> bool {
+    anim.is_none_or(|(anim, start)| {
+        now.duration_since(start).as_millis() >= anim.duration_ms as u128
+    })
+}
+
 /// How far right the image moves to be fully off-screen.
 fn travel(image_width: u32) -> f64 {
     (image_width + EDGE_MARGIN) as f64
@@ -383,6 +392,19 @@ fn canvas_width(image_width: u32, scale: f64) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn slide_out_is_over_by_time_alone() {
+        // No frame callback needed: a sleeping monitor must not keep a
+        // closing thumbnail (and the host) around forever.
+        let start = Instant::now();
+        let anim = Some((Anim::slide_out(0.0, 236.0), start));
+        assert!(!anim_over(anim, start));
+        assert!(!anim_over(anim, start + Duration::from_millis(149)));
+        assert!(anim_over(anim, start + Duration::from_millis(150)));
+        assert!(anim_over(None, start));
+    }
 
     #[test]
     fn loads_png_without_extension() {
