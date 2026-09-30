@@ -7,6 +7,7 @@ mod detach;
 mod doctor;
 mod error;
 mod frame;
+mod host;
 mod ipc;
 mod lock;
 mod log;
@@ -59,6 +60,9 @@ enum Command {
     },
     /// Report what the compositor and system support.
     Doctor,
+    /// Internal: the process that shows preview thumbnails.
+    #[command(name = "__preview-host", hide = true)]
+    PreviewHost,
 }
 
 #[derive(Args)]
@@ -115,6 +119,7 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Doctor => doctor::run(),
+        Command::PreviewHost => host::run(),
         Command::Screen { all, common } => capture(Mode::Screen { all }, common),
         Command::Region { common } => capture(Mode::Region, common),
     }
@@ -244,6 +249,13 @@ mod tests {
         assert!(!parses(&["screen", "--all", "-o", "-"]));
         assert!(!parses(&["screen", "--all", "--clipboard-only"]));
         assert!(!parses(&["region", "--clipboard-only", "-o", "a.png"]));
+    }
+
+    #[test]
+    fn preview_host_is_hidden_from_help() {
+        assert!(parses(&["__preview-host"]));
+        let help = Cli::command().render_help().to_string();
+        assert!(!help.contains("preview-host"), "{help}");
     }
 
     #[test]

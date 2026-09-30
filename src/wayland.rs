@@ -30,6 +30,7 @@ use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::Z
 use crate::capture::Pending;
 use crate::error::HintExt;
 use crate::frame::OutputGeom;
+use crate::host::Host;
 use crate::region::Overlay;
 
 /// An output as valw sees it.
@@ -66,6 +67,8 @@ pub struct State {
     pub captures: Vec<Pending>,
     /// The region selection overlay, while it is open.
     pub overlay: Option<Overlay>,
+    /// The preview thumbnails, in the preview host process.
+    pub preview: Option<Host>,
 }
 
 impl Wayland {
@@ -93,6 +96,7 @@ impl Wayland {
             pointer: None,
             captures: Vec::new(),
             overlay: None,
+            preview: None,
         };
         // Two round trips: one for wl_output, one for the xdg-output details.
         queue
@@ -278,6 +282,9 @@ impl CompositorHandler for State {
         if let Some(overlay) = &mut self.overlay {
             overlay.frame_done(surface, qh);
         }
+        if let Some(preview) = &mut self.preview {
+            preview.frame_done(surface, qh);
+        }
     }
 
     fn surface_enter(
@@ -312,9 +319,12 @@ impl OutputHandler for State {
 }
 
 impl LayerShellHandler for State {
-    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &LayerSurface) {
+    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, layer: &LayerSurface) {
         if let Some(overlay) = &mut self.overlay {
             overlay.cancel();
+        }
+        if let Some(preview) = &mut self.preview {
+            preview.closed(layer);
         }
     }
 
@@ -328,6 +338,9 @@ impl LayerShellHandler for State {
     ) {
         if let Some(overlay) = &mut self.overlay {
             overlay.configure(layer, configure.new_size, qh);
+        }
+        if let Some(preview) = &mut self.preview {
+            preview.configure(layer, qh);
         }
     }
 }
@@ -467,6 +480,9 @@ impl PointerHandler for State {
     ) {
         if let Some(overlay) = &mut self.overlay {
             overlay.pointer(events, self.cursor_device.as_ref(), qh);
+        }
+        if let Some(preview) = &mut self.preview {
+            preview.pointer(events, self.cursor_device.as_ref(), qh);
         }
     }
 }
