@@ -14,6 +14,7 @@ mod output;
 mod region;
 mod render;
 mod selection;
+mod stack;
 mod wayland;
 
 use std::path::PathBuf;
