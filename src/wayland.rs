@@ -38,6 +38,8 @@ pub struct Output {
     pub wl: wl_output::WlOutput,
     pub geom: OutputGeom,
     pub transform: wl_output::Transform,
+    /// Physical pixels per logical pixel, e.g. 1.25.
+    pub scale: f64,
 }
 
 pub struct Wayland {
@@ -112,29 +114,7 @@ impl Wayland {
 
     /// All outputs with a known name and logical geometry.
     pub fn outputs(&self) -> Vec<Output> {
-        self.state
-            .outputs
-            .outputs()
-            .filter_map(|wl| {
-                let info = self.state.outputs.info(&wl)?;
-                let (x, y) = info.logical_position?;
-                let (width, height) = info.logical_size?;
-                Some(Output {
-                    geom: OutputGeom {
-                        name: info
-                            .name
-                            .clone()
-                            .unwrap_or_else(|| format!("output-{}", info.id)),
-                        x,
-                        y,
-                        width,
-                        height,
-                    },
-                    transform: info.transform,
-                    wl,
-                })
-            })
-            .collect()
+        self.state.output_list()
     }
 
     /// `(interface, version)` of every global, sorted.
@@ -215,6 +195,57 @@ impl Wayland {
                 .context("Wayland dispatch failed")?;
         }
         Ok(())
+    }
+}
+
+impl State {
+    /// All outputs with a known name and logical geometry.
+    pub fn output_list(&self) -> Vec<Output> {
+        self.outputs
+            .outputs()
+            .filter_map(|wl| {
+                let info = self.outputs.info(&wl)?;
+                let (x, y) = info.logical_position?;
+                let (width, height) = info.logical_size?;
+                Some(Output {
+                    scale: output_scale(&info, width),
+                    geom: OutputGeom {
+                        name: info
+                            .name
+                            .clone()
+                            .unwrap_or_else(|| format!("output-{}", info.id)),
+                        x,
+                        y,
+                        width,
+                        height,
+                    },
+                    transform: info.transform,
+                    wl,
+                })
+            })
+            .collect()
+    }
+}
+
+/// Physical pixels per logical pixel: the current mode's width (turned to
+/// match the logical orientation) over the logical width.
+fn output_scale(info: &smithay_client_toolkit::output::OutputInfo, logical_width: i32) -> f64 {
+    let Some(mode) = info.modes.iter().find(|m| m.current) else {
+        return info.scale_factor as f64;
+    };
+    let (w, h) = mode.dimensions;
+    let rotated = matches!(
+        info.transform,
+        wl_output::Transform::_90
+            | wl_output::Transform::_270
+            | wl_output::Transform::Flipped90
+            | wl_output::Transform::Flipped270
+    );
+    let physical_width = if rotated { h } else { w };
+    if logical_width > 0 {
+        physical_width as f64 / logical_width as f64
+    } else {
+        1.0
     }
 }
 

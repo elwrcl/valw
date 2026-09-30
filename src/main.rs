@@ -16,6 +16,7 @@ mod region;
 mod render;
 mod selection;
 mod stack;
+mod thumbnail;
 mod wayland;
 
 use std::path::PathBuf;
