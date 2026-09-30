@@ -1,6 +1,3 @@
-// Phase 2 modules land before the CLI uses them; Task 6 removes this.
-#![allow(dead_code)]
-
 mod capture;
 mod config;
 mod detach;
@@ -79,6 +76,9 @@ struct Common {
     /// Include the mouse cursor.
     #[arg(long)]
     cursor: bool,
+    /// Don't show the preview thumbnail.
+    #[arg(long)]
+    no_preview: bool,
 }
 
 fn parse_delay(s: &str) -> Result<Duration, String> {
@@ -138,33 +138,57 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
     }
     let outputs = wl.outputs();
     anyhow::ensure!(!outputs.is_empty(), "the compositor reported no outputs");
+    // Thumbnails from earlier captures must not end up in this one.
+    let mut hide = ipc::HideGuard::new(&ipc::socket_path());
 
-    // (image, output name for the file name) and which one goes to the clipboard.
-    let (shots, clip): (Vec<(RgbaImage, Option<String>)>, usize) = match mode {
+    // (image, output name for the file name), which one goes to the
+    // clipboard, and the output the preview appears on.
+    let (shots, clip, source): (Vec<(RgbaImage, Option<String>)>, usize, String) = match mode {
         Mode::Screen { all } => {
             let focused = focused_output(&outputs);
+            let source = outputs[focused].geom.name.clone();
             if all {
                 let frames = wl.capture(&outputs, cursor)?;
                 let shots = frames
                     .into_iter()
                     .map(|f| (f.to_rgba(f.full()), Some(f.output.name)))
                     .collect();
-                (shots, focused)
+                (shots, focused, source)
             } else {
                 let frame = wl.capture(&outputs[focused..=focused], cursor)?.remove(0);
-                (vec![(frame.to_rgba(frame.full()), None)], 0)
+                (vec![(frame.to_rgba(frame.full()), None)], 0, source)
             }
         }
         Mode::Region => {
             let frames = wl.capture(&outputs, cursor)?;
             let (i, r) = region::select(&mut wl, &outputs, &frames)?;
-            (vec![(frames[i].to_rgba(r), None)], 0)
+            let source = frames[i].output.name.clone();
+            (vec![(frames[i].to_rgba(r), None)], 0, source)
         }
     };
     drop(wl);
 
     let target = Target::from_args(common.output, common.clipboard_only);
-    deliver(shots, clip, &target, &config, lock)
+    let (pngs, saved) = save(&shots, clip, &target, &config)?;
+    if config.preview.enabled
+        && !common.no_preview
+        && let Some(file) = saved
+        && let Err(e) = hide.add(&ipc::socket_path(), &file, &source, ipc::start_host)
+    {
+        tracing::warn!("no preview: {e:#}");
+    }
+    // Show the thumbnails again before forking the clipboard server; the
+    // child would inherit this connection and keep them hidden.
+    drop(hide);
+
+    if target == Target::ClipboardOnly || config.save.copy_to_clipboard {
+        let png = pngs
+            .into_iter()
+            .nth(clip)
+            .context("no image for the clipboard")?;
+        output::copy_to_clipboard(png, lock)?;
+    }
+    Ok(())
 }
 
 /// Index of niri's focused output, or 0 if niri can't tell us.
@@ -186,45 +210,50 @@ fn focused_output(outputs: &[wayland::Output]) -> usize {
         })
 }
 
-fn deliver(
-    shots: Vec<(RgbaImage, Option<String>)>,
+/// Encodes and writes the shots. Returns the PNGs and, when the clipboard
+/// shot went to a regular file, that file's absolute path for the preview.
+fn save(
+    shots: &[(RgbaImage, Option<String>)],
     clip: usize,
     target: &Target,
     config: &Config,
-    lock: Lock,
-) -> Result<()> {
+) -> Result<(Vec<Vec<u8>>, Option<PathBuf>)> {
     let now = Local::now();
     let pngs = shots
         .iter()
         .map(|(img, _)| output::encode_png(img))
         .collect::<Result<Vec<_>>>()?;
 
-    match target {
+    let saved = match target {
         Target::Default => {
             let dir = config.save_dir();
-            for (png, (_, name)) in pngs.iter().zip(&shots) {
+            let mut paths = Vec::new();
+            for (png, (_, name)) in pngs.iter().zip(shots) {
                 let file = output::file_name(&config.save.filename, &now, name.as_deref())?;
                 let path = output::unique_path(&dir, &file);
                 output::write_atomic(&path, png)?;
                 println!("{}", path.display());
+                paths.push(path);
             }
+            paths.into_iter().nth(clip)
         }
         Target::Path(path) => {
             output::write_atomic(path, &pngs[0])?;
             println!("{}", path.display());
+            // No preview for devices and pipes (`-o /dev/null`).
+            std::fs::metadata(path)
+                .is_ok_and(|m| m.is_file())
+                .then(|| path.clone())
         }
-        Target::Stdout => output::write_stdout(&pngs[0])?,
-        Target::ClipboardOnly => {}
-    }
-
-    if *target == Target::ClipboardOnly || config.save.copy_to_clipboard {
-        let png = pngs
-            .into_iter()
-            .nth(clip)
-            .context("no image for the clipboard")?;
-        output::copy_to_clipboard(png, lock)?;
-    }
-    Ok(())
+        Target::Stdout => {
+            output::write_stdout(&pngs[0])?;
+            None
+        }
+        Target::ClipboardOnly => None,
+    };
+    // The host may run in another directory than this capture.
+    let saved = saved.map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+    Ok((pngs, saved))
 }
 
 #[cfg(test)]
@@ -249,6 +278,8 @@ mod tests {
         assert!(!parses(&["screen", "--all", "-o", "-"]));
         assert!(!parses(&["screen", "--all", "--clipboard-only"]));
         assert!(!parses(&["region", "--clipboard-only", "-o", "a.png"]));
+        assert!(parses(&["region", "--no-preview"]));
+        assert!(parses(&["screen", "--all", "--no-preview"]));
     }
 
     #[test]
