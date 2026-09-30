@@ -7,6 +7,7 @@ mod detach;
 mod doctor;
 mod error;
 mod frame;
+mod ipc;
 mod lock;
 mod log;
 mod niri;

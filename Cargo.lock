@@ -1058,6 +1058,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_ignored",
+ "serde_json",
  "smithay-client-toolkit",
  "tempfile",
  "toml",
