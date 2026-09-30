@@ -21,7 +21,10 @@
 
         cargoLock.lockFile = ../Cargo.lock;
 
-        nativeBuildInputs = [ pkgs.pkg-config ];
+        nativeBuildInputs = [
+          pkgs.makeWrapper
+          pkgs.pkg-config
+        ];
         buildInputs = [
           pkgs.libxkbcommon
           pkgs.wayland
@@ -29,6 +32,11 @@
 
         # Tests run through `nix flake check` instead.
         doCheck = false;
+
+        # Clicking a preview opens Satty. --suffix keeps a user's own Satty first.
+        postInstall = ''
+          wrapProgram $out/bin/valw --suffix PATH : ${lib.makeBinPath [ pkgs.satty ]}
+        '';
 
         meta = {
           description = "macOS-style screenshots for niri";

@@ -32,6 +32,8 @@
             {
               nativeBuildInputs = [
                 pkgs.file
+                pkgs.grim
+                pkgs.imagemagick
                 pkgs.sway-unwrapped
                 valw
               ];
@@ -62,6 +64,34 @@
               timeout 10 sh -c 'valw screen -o - | cat > shot.png'
               file shot.png | tee file.txt
               grep -q 'PNG image data, 1280 x 720' file.txt
+
+              # Preview. The background is solid black, so a thumbnail in the
+              # bottom-right corner shows up as more than one colour there.
+              mkdir -p $HOME/.config/valw
+              printf '[preview]\ntimeout_secs = 2\n' > $HOME/.config/valw/config.toml
+              socket=$XDG_RUNTIME_DIR/valw.sock
+              corner() { magick "$1" -crop 300x200+980+520 +repage -format '%k' info:; }
+              wait_for() { # $1: test expression, $2: tenths of a second
+                for _ in $(seq "$2"); do eval "$1" && return 0; sleep 0.1; done
+                echo "timed out waiting for: $1"
+                exit 1
+              }
+
+              valw screen > /dev/null
+              wait_for '[ -S $socket ]' 10
+              sleep 0.5
+              grim with-thumbnail.png
+              [ "$(corner with-thumbnail.png)" -gt 1 ] || { echo "thumbnail not visible"; exit 1; }
+              valw screen --no-preview -o hidden.png > /dev/null
+              [ "$(corner hidden.png)" -eq 1 ] || { echo "thumbnail ended up in a screenshot"; exit 1; }
+              wait_for '[ ! -S $socket ]' 40
+
+              valw screen --no-preview > /dev/null
+              sleep 1
+              if [ -S $socket ]; then
+                echo "--no-preview started a host"
+                exit 1
+              fi
 
               touch $out
             '';
