@@ -142,6 +142,20 @@ pub fn check_save_dir(dir: &Path) -> Check {
     }
 }
 
+/// EGL with an OpenGL ES 3 config; only zoom needs it.
+pub fn check_egl(result: Result<String>) -> Check {
+    match result {
+        Ok(vendor) => check(Level::Ok, format!("EGL ({vendor}) with OpenGL ES 3 (zoom)")),
+        Err(e) => check(
+            Level::Warn,
+            format!(
+                "no OpenGL ES 3 through EGL: {} (zoom won't work)",
+                one_line(&e)
+            ),
+        ),
+    }
+}
+
 /// Runs every check and prints one line each. Fails if any check failed.
 pub fn run() -> Result<()> {
     let mut checks = Vec::new();
@@ -158,6 +172,7 @@ pub fn run() -> Result<()> {
                     ),
                 ));
             }
+            checks.push(check_egl(crate::zoom::gl::probe(&wl.conn)));
         }
         Err(e) => checks.push(check(Level::Fail, format!("wayland: {}", one_line(&e)))),
     }
@@ -181,6 +196,16 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn egl_check_levels() {
+        let ok = check_egl(Ok("Mesa Project".into()));
+        assert_eq!(ok.level, Level::Ok);
+        assert!(ok.text.contains("Mesa Project"), "{}", ok.text);
+        let missing = check_egl(Err(anyhow::anyhow!("could not load libEGL.so.1")));
+        assert_eq!(missing.level, Level::Warn, "only zoom needs it");
+        assert!(missing.text.contains("zoom"), "{}", missing.text);
+    }
 
     fn globals(list: &[(&str, u32)]) -> Vec<(String, u32)> {
         list.iter().map(|&(n, v)| (n.to_string(), v)).collect()

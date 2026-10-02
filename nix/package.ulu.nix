@@ -34,8 +34,11 @@
         doCheck = false;
 
         # Clicking a preview opens Satty. --suffix keeps a user's own Satty first.
+        # Zoom loads libEGL.so.1 (libglvnd); Mesa's drivers come from the system.
         postInstall = ''
-          wrapProgram $out/bin/valw --suffix PATH : ${lib.makeBinPath [ pkgs.satty ]}
+          wrapProgram $out/bin/valw \
+            --suffix PATH : ${lib.makeBinPath [ pkgs.satty ]} \
+            --suffix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ pkgs.libglvnd ]}
         '';
 
         meta = {

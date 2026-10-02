@@ -9,8 +9,11 @@ license = "MIT"
 anyhow = "1.0.104"
 chrono = "0.4.45"
 clap = { version = "4.6.7", features = ["derive"] }
+glow = "0.18.0"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+khronos-egl = { version = "6.0.0", features = ["dynamic"] }
 libc = "0.2.189"
+libloading = "0.8"
 niri-ipc = "=26.4.0"
 rustix = { version = "1.1.5", features = ["event", "fs", "pipe", "process", "stdio"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -20,7 +23,9 @@ smithay-client-toolkit = "0.21.1"
 toml = "1.1.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+wayland-backend = { version = "0.3.17", features = ["client_system"] }
 wayland-client = "0.31.15"
+wayland-egl = "0.32.11"
 wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 wl-clipboard-rs = "0.9.4"
