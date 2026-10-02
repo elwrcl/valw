@@ -32,3 +32,14 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - A press during the slide-in gives a shifted grab point; use (x - offset, y).
 - A swipe released back near its start opens Satty (Phase 2 behaviour); a locked swipe should never become a click.
 - The (hidden, dragging) visibility/input decision has no unit test; extract it as a pure function.
+
+## Window mode (Phase 3)
+
+- [ ] `valw window`, click a tiled window → that window alone is saved, preview on its monitor.
+- [ ] Same for a floating window, and for a window partly covered by another (the covered part is still there).
+- [ ] A window on the other monitor (different scale, if any) → right size and sharpness; preview on that monitor.
+- [ ] Esc during the pick → nothing saved, exit code 3, thumbnails come back.
+- [ ] `--cursor` with the pointer over the window → the pointer is in the shot.
+- [ ] `valw region`, press Space before dragging → the overlay closes and the window pick starts; Space while dragging does nothing.
+- [ ] `--clipboard-only` and `-o -` → clipboard / stdout get the window; no stray `valw-window-*.png` left in `$XDG_RUNTIME_DIR`.
+- [ ] niri's own "Screenshot captured" notification appears (expected, see the spec); the clipboard ends up with the window.
