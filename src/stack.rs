@@ -46,6 +46,17 @@ pub fn excess(count: usize) -> usize {
     count.saturating_sub(MAX)
 }
 
+/// Which thumbnails to evict, given whether each open one (oldest first) is
+/// being dragged. A dragged one is skipped: evicting it would leave the drop
+/// with nothing to deliver.
+pub fn evictions(dragging_oldest_first: &[bool]) -> Vec<usize> {
+    let count = excess(dragging_oldest_first.len());
+    (0..dragging_oldest_first.len())
+        .filter(|&i| !dragging_oldest_first[i])
+        .take(count)
+        .collect()
+}
+
 /// What a pointer release on a thumbnail means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Release {
@@ -189,6 +200,16 @@ mod tests {
         assert_eq!(bottom_margins(&[]), Vec::<u32>::new());
         assert_eq!(bottom_margins(&[124]), vec![16]);
         assert_eq!(bottom_margins(&[124, 124, 220]), vec![16, 152, 288]);
+    }
+
+    #[test]
+    fn eviction_skips_a_dragged_thumbnail() {
+        // Oldest first; `true` = being dragged.
+        let none = [false; 6];
+        assert_eq!(evictions(&none), vec![0]);
+        let oldest_dragged = [true, false, false, false, false, false];
+        assert_eq!(evictions(&oldest_dragged), vec![1]);
+        assert_eq!(evictions(&[false; 5]), Vec::<usize>::new());
     }
 
     #[test]

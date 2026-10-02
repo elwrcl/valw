@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -103,6 +103,8 @@ pub struct Host {
 /// The drag-out in progress. Dropping the source cancels the drag.
 struct Drag {
     thumb: u64,
+    /// Kept here so the drop still delivers if the thumbnail goes away.
+    path: PathBuf,
     source: DragSource,
     icon: WlSurface,
     icon_viewport: WpViewport,
@@ -172,7 +174,9 @@ pub fn run() -> Result<()> {
         .run(Duration::from_millis(500), &mut state, |state| {
             let host = state.preview.as_mut().expect("host state");
             host.tidy();
-            let busy = host.thumbs.len() + host.writers.load(Ordering::SeqCst);
+            let busy = host.thumbs.len()
+                + host.writers.load(Ordering::SeqCst)
+                + usize::from(host.drag.is_some());
             if host.core.should_exit(busy, Instant::now()) {
                 signal.stop();
             }
@@ -281,10 +285,7 @@ impl Host {
         let Some(drag) = self.drag.as_ref().filter(|d| d.source.inner() == source) else {
             return;
         };
-        let Some(thumb) = self.thumbs.iter().find(|t| t.id == drag.thumb) else {
-            return;
-        };
-        let path = thumb.path.clone();
+        let path = drag.path.clone();
         let writers = Arc::clone(&self.writers);
         writers.fetch_add(1, Ordering::SeqCst);
         std::thread::spawn(move || {
@@ -394,6 +395,7 @@ fn start_drag(state: &mut State, i: usize, start: DragStart, qh: &QueueHandle<St
     tracing::info!("drag-out started for {}", thumb.path.display());
     host.drag = Some(Drag {
         thumb: thumb.id,
+        path: thumb.path.clone(),
         source,
         icon,
         icon_viewport,
@@ -469,8 +471,9 @@ fn add(state: &mut State, path: &Path, output_name: &str) -> Result<()> {
     let open: Vec<usize> = (0..host.thumbs.len())
         .filter(|&i| host.thumbs[i].output == output.geom.name && !host.thumbs[i].is_closing())
         .collect();
-    for &i in open.iter().take(stack::excess(open.len())) {
-        host.thumbs[i].slide_out(&qh);
+    let dragging: Vec<bool> = open.iter().map(|&i| host.thumbs[i].is_dragging()).collect();
+    for k in stack::evictions(&dragging) {
+        host.thumbs[open[k]].slide_out(&qh);
     }
     host.restack();
 

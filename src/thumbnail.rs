@@ -240,6 +240,10 @@ impl Thumbnail {
         self.closing && (!self.visible() || anim_over(self.anim, Instant::now()))
     }
 
+    pub fn is_dragging(&self) -> bool {
+        self.dragging
+    }
+
     fn visible(&self) -> bool {
         !self.hidden && !self.dragging
     }
