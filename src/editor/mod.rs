@@ -16,6 +16,8 @@ use eframe::egui::{
 };
 use image::RgbaImage;
 
+use crate::frame::PixelRect;
+
 use self::doc::Doc;
 use self::shape::{Drag, PALETTE, Prim, Style, Tool, WIDTHS, geometry};
 use self::view::Fit;
@@ -105,7 +107,8 @@ impl Editor {
     }
 
     fn png(&self) -> Result<Vec<u8>> {
-        crate::output::encode_png(&export::render(&self.base, self.doc.shapes()))
+        let image = export::render(&self.base, self.doc.shapes());
+        crate::output::encode_png(&export::crop(image, self.doc.crop()))
     }
 
     fn save(&mut self, copy: bool) -> bool {
@@ -293,8 +296,14 @@ impl Editor {
         let area = ui.max_rect();
         let (response, painter) = ui.allocate_painter(area.size(), Sense::drag());
         let size = self.base.dimensions();
-        let fit = Fit::new(
-            size,
+        let shown = self.doc.crop().unwrap_or(PixelRect {
+            x: 0,
+            y: 0,
+            width: size.0,
+            height: size.1,
+        });
+        let fit = Fit::with_crop(
+            shown,
             (area.min.x, area.min.y, area.width(), area.height()),
             ui.ctx().pixels_per_point(),
         );
@@ -302,12 +311,14 @@ impl Editor {
             let (x, y) = fit.to_screen(p);
             Pos2::new(x, y)
         };
-        let image_rect =
-            Rect::from_min_max(to_pos((0.0, 0.0)), to_pos((size.0 as f32, size.1 as f32)));
+        let (x0, y0) = (shown.x as f32, shown.y as f32);
+        let (x1, y1) = (x0 + shown.width as f32, y0 + shown.height as f32);
+        let image_rect = Rect::from_min_max(to_pos((x0, y0)), to_pos((x1, y1)));
+        let (w, h) = (size.0 as f32, size.1 as f32);
         painter.image(
             self.texture.id(),
             image_rect,
-            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Rect::from_min_max(Pos2::new(x0 / w, y0 / h), Pos2::new(x1 / w, y1 / h)),
             Color32::WHITE,
         );
 
@@ -330,7 +341,7 @@ impl Editor {
             self.drag = Some(Drag::new(self.tool, self.style(), p));
         }
         if let (Some(drag), Some(p)) = (&mut self.drag, pointer) {
-            drag.move_to(view::clamp(p, size));
+            drag.move_to(view::clamp(p, shown));
         }
         if response.drag_stopped()
             && let Some(drag) = self.drag.take()

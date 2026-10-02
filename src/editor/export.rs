@@ -31,8 +31,6 @@ pub fn render<'a>(base: &RgbaImage, shapes: impl IntoIterator<Item = &'a Shape>)
 }
 
 /// The part of `image` inside the last crop, or all of it.
-// The editor calls this from Task 3 of the 5b plan on; that task removes this.
-#[allow(dead_code)]
 pub fn crop(image: RgbaImage, rect: Option<PixelRect>) -> RgbaImage {
     match rect {
         Some(r) => image::imageops::crop_imm(&image, r.x, r.y, r.width, r.height).to_image(),
