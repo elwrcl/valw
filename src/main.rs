@@ -1,3 +1,6 @@
+// Drag-out modules land before the host uses them; Task 3 removes this.
+#![allow(dead_code)]
+
 mod capture;
 mod config;
 mod detach;

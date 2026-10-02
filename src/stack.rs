@@ -69,6 +69,29 @@ pub fn release(dx: f64, dy: f64, width: f64) -> Release {
     }
 }
 
+/// What a press turns into once the pointer has moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gesture {
+    /// Mostly rightward: the thumbnail follows and may be dismissed.
+    Swipe,
+    /// Any other direction: carry the screenshot out by drag-and-drop.
+    DragOut,
+}
+
+/// Classifies a press that has moved (`dx`, `dy`), once it has moved at
+/// least `CLICK_SLOP`. Rightward and at most 45° off horizontal is a swipe;
+/// the thumbnails sit in the bottom-right corner, so every drop target is
+/// left or up anyway.
+pub fn classify(dx: f64, dy: f64) -> Option<Gesture> {
+    if dx.hypot(dy) < CLICK_SLOP {
+        None
+    } else if dx > 0.0 && dy.abs() <= dx {
+        Some(Gesture::Swipe)
+    } else {
+        Some(Gesture::DragOut)
+    }
+}
+
 /// Horizontal image offset while dragging: follows the pointer, right only.
 pub fn drag_offset(dx: f64) -> f64 {
     dx.max(0.0)
@@ -184,6 +207,27 @@ mod tests {
         assert_eq!(release(0.40 * w, 0.0, w), Release::Dismiss);
         assert_eq!(release(-100.0, 0.0, w), Release::SnapBack);
         assert_eq!(release(0.0, 50.0, w), Release::SnapBack);
+    }
+
+    #[test]
+    fn small_moves_are_undecided() {
+        assert_eq!(classify(0.0, 0.0), None);
+        assert_eq!(classify(3.0, 2.0), None);
+    }
+
+    #[test]
+    fn rightward_within_45_degrees_is_a_swipe() {
+        assert_eq!(classify(10.0, 0.0), Some(Gesture::Swipe));
+        assert_eq!(classify(10.0, -5.0), Some(Gesture::Swipe), "about 27° up");
+        assert_eq!(classify(10.0, 10.0), Some(Gesture::Swipe), "exactly 45°");
+    }
+
+    #[test]
+    fn every_other_direction_drags_out() {
+        assert_eq!(classify(-10.0, 0.0), Some(Gesture::DragOut), "left");
+        assert_eq!(classify(0.0, -10.0), Some(Gesture::DragOut), "up");
+        assert_eq!(classify(0.0, 10.0), Some(Gesture::DragOut), "down");
+        assert_eq!(classify(5.0, -10.0), Some(Gesture::DragOut), "steep right");
     }
 
     #[test]
