@@ -107,3 +107,12 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - [ ] N: clicks place 1, 2, 3 …; undo then a new click reuses the freed number.
 - [ ] C: drag a crop, adjust its edges and corners (the cursor changes), Enter applies, Esc cancels; the canvas then shows only the crop; drawing after a crop lands where you click; undo restores the full image; the saved PNG has the crop's size.
 - [ ] The toolbar shows all 10 tools and still wraps in a narrow window.
+
+### Known minors (deferred from the editor tools review)
+
+- A crop thinner than 16 screen px grabs both opposite edges when pressed and collapses.
+- Redo while a crop is being adjusted can apply a crop that isn't inside the current one.
+- The canvas edge of a crop can show a faint fringe from outside it (export unaffected).
+- Every keystroke re-renders the whole image; fine at 1080p, may lag on 4K.
+- The pixelate drag preview is hard to see on white.
+- The unsaved bar mentions Ctrl+S, which is ignored while typing.
