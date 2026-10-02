@@ -43,3 +43,10 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - [ ] `valw region`, press Space before dragging → the overlay closes and the window pick starts; Space while dragging does nothing.
 - [ ] `--clipboard-only` and `-o -` → clipboard / stdout get the window; no stray `valw-window-*.png` left in `$XDG_RUNTIME_DIR`.
 - [ ] niri's own "Screenshot captured" notification appears (expected, see the spec); the clipboard ends up with the window.
+
+### Known minors (deferred from the window mode review)
+
+- The 5 s wait includes niri's blocking "Screenshot captured" D-Bus notification; a hung notification daemon fails the shot and leaves the late temp file. Try decoding the temp file once on timeout.
+- niri sets the clipboard itself even with `copy_to_clipboard = false` (no niri flag to avoid it); the spec's "end state unchanged" is wrong for that config. Document it.
+- The Space path keeps the Wayland connection open through the pick (the spec says it is dropped). Harmless; align the spec or drop it earlier.
+- Clicking something that isn't a window during the pick exits 3 silently, like Esc. Log "no window under the click".
