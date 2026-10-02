@@ -4,6 +4,7 @@
 mod capture;
 mod config;
 mod detach;
+mod dnd;
 mod doctor;
 mod error;
 mod frame;
