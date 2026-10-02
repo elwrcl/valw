@@ -50,3 +50,15 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - niri sets the clipboard itself even with `copy_to_clipboard = false` (no niri flag to avoid it); the spec's "end state unchanged" is wrong for that config. Document it.
 - The Space path keeps the Wayland connection open through the pick (the spec says it is dropped). Harmless; align the spec or drop it earlier.
 - Clicking something that isn't a window during the pick exits 3 silently, like Esc. Log "no window under the click".
+
+## Zoom (Phase 4)
+
+- [ ] `valw zoom` → the focused output freezes at 1×; Esc and `q` leave, nothing saved, exit 0, thumbnails come back.
+- [ ] Wheel zooms towards the pointer (the point under it stays put), smoothly, up to 32×; pixels stay crisp.
+- [ ] Touchpad scrolling zooms smoothly too.
+- [ ] Left drag pans 1:1 and never shows anything outside the screenshot; the cursor turns into a grabbing hand.
+- [ ] `f` toggles the flashlight (outside dimmed to 25 %), it follows the pointer; Ctrl+wheel resizes it.
+- [ ] `0` animates back to 1×.
+- [ ] `c` at some zoom → the saved image is exactly the visible area at native resolution; preview and clipboard as usual.
+- [ ] On the 1366×768 laptop panel and the 1920×1080 monitor; stays smooth (no stutter) on the HD 4000.
+- [ ] `[zoom] scroll_step` / `flashlight_radius` in the config take effect; `valw doctor` shows the EGL line.
