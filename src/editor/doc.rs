@@ -41,8 +41,6 @@ impl Doc {
     }
 
     /// The number the next Number shape shows.
-    // Used by the editor from Task 4 of the 5b plan on; that task removes this.
-    #[allow(dead_code)]
     pub fn next_number(&self) -> u32 {
         1 + self.shapes().filter(|s| s.tool == Tool::Number).count() as u32
     }
@@ -51,8 +49,6 @@ impl Doc {
         self.push(Item::Shape(shape));
     }
 
-    // Used by the editor from Task 4 of the 5b plan on; that task removes this.
-    #[allow(dead_code)]
     pub fn add_crop(&mut self, rect: PixelRect) {
         self.push(Item::Crop(rect));
     }

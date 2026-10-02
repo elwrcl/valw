@@ -19,7 +19,7 @@ use image::RgbaImage;
 use crate::frame::PixelRect;
 
 use self::doc::Doc;
-use self::shape::{Drag, PALETTE, Prim, Style, Tool, WIDTHS, geometry};
+use self::shape::{Drag, P, PALETTE, Prim, Shape, Style, Tool, WIDTHS, geometry, text_size};
 use self::view::Fit;
 
 const APP_ID: &str = "valw-editor";
@@ -58,14 +58,16 @@ struct Editor {
     /// The base with every finished shape, drawn by the export renderer so
     /// the canvas shows the saved pixels.
     texture: egui::TextureHandle,
-    /// The `Doc::revision` the texture shows.
-    shown: u64,
+    /// What the texture shows: the `Doc::revision` and the text being typed.
+    texture_key: (u64, Option<Shape>),
     toolbar_height: f32,
     doc: Doc,
     tool: Tool,
     color: usize,
     width: usize,
     drag: Option<Drag>,
+    typing: Option<Typing>,
+    cropping: Option<CropEdit>,
     status: Option<(String, Instant)>,
     /// The unsaved-changes bar is showing.
     confirm_close: bool,
@@ -82,13 +84,15 @@ impl Editor {
             path,
             base,
             texture,
-            shown: 0,
+            texture_key: (0, None),
             toolbar_height: 0.0,
             doc: Doc::new(),
             tool: Tool::Arrow,
             color: 0,
             width: 1,
             drag: None,
+            typing: None,
+            cropping: None,
             status: None,
             confirm_close: false,
             closing: false,
@@ -177,6 +181,10 @@ impl Editor {
     }
 
     fn keys(&mut self, ctx: &egui::Context) {
+        if self.typing.is_some() {
+            self.type_keys(ctx);
+            return;
+        }
         let shift_cmd = Modifiers::COMMAND | Modifiers::SHIFT;
         // Holding a key must not save, copy or close again and again; undo
         // and redo may repeat.
@@ -196,6 +204,13 @@ impl Editor {
         if pressed(Modifiers::COMMAND, Key::C) {
             self.copy();
         }
+        if self.cropping.is_some() {
+            if pressed(Modifiers::NONE, Key::Enter) {
+                self.apply_crop();
+            } else if pressed(Modifiers::NONE, Key::Escape) {
+                self.cropping = None;
+            }
+        }
         if pressed(Modifiers::NONE, Key::Escape) {
             if self.doc.is_dirty() && !self.confirm_close {
                 self.confirm_close = true;
@@ -210,9 +225,13 @@ impl Editor {
             (Key::L, Tool::Line),
             (Key::P, Tool::Pen),
             (Key::H, Tool::Highlighter),
+            (Key::T, Tool::Text),
+            (Key::B, Tool::Pixelate),
+            (Key::N, Tool::Number),
+            (Key::C, Tool::Crop),
         ] {
             if pressed(Modifiers::NONE, key) {
-                self.tool = tool;
+                self.set_tool(tool);
             }
         }
     }
@@ -233,7 +252,7 @@ impl Editor {
                     .selectable_label(self.tool == tool, tool.label())
                     .clicked()
                 {
-                    self.tool = tool;
+                    self.set_tool(tool);
                 }
             }
             ui.separator();
@@ -307,7 +326,7 @@ impl Editor {
             (area.min.x, area.min.y, area.width(), area.height()),
             ui.ctx().pixels_per_point(),
         );
-        let to_pos = |p: shape::P| {
+        let to_pos = |p: P| {
             let (x, y) = fit.to_screen(p);
             Pos2::new(x, y)
         };
@@ -322,44 +341,307 @@ impl Editor {
             Color32::WHITE,
         );
 
-        if self.doc.revision() != self.shown {
-            let composite = export::render(&self.base, self.doc.shapes());
+        // The texture: every finished shape plus the text being typed, all
+        // drawn by the export renderer.
+        let typed = self.typing.as_ref().map(|t| Shape {
+            tool: Tool::Text,
+            style: self.style(),
+            points: vec![t.at],
+            text: t.text.clone(),
+        });
+        let key = (self.doc.revision(), typed.clone());
+        if key != self.texture_key {
+            let composite = export::render(&self.base, self.doc.shapes().chain(typed.as_ref()));
             let size = [composite.width() as usize, composite.height() as usize];
             let pixels = egui::ColorImage::from_rgba_unmultiplied(size, composite.as_raw());
             self.texture.set(pixels, egui::TextureOptions::LINEAR);
-            self.shown = self.doc.revision();
+            self.texture_key = key;
         }
 
         let shift = ui.input(|i| i.modifiers.shift);
-        let pointer = response
-            .interact_pointer_pos()
-            .map(|p| fit.to_image((p.x, p.y)));
+        let screen = response.interact_pointer_pos();
+        let pointer = screen.map(|p| view::clamp(fit.to_image((p.x, p.y)), shown));
+        let crop_screen = |r: (f32, f32, f32, f32)| {
+            let (a, b) = (to_pos((r.0, r.1)), to_pos((r.2, r.3)));
+            (a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y))
+        };
+
         if response.drag_started()
+            && let (Some(p), Some(at)) = (pointer, screen)
+            && (image_rect.contains(at) || self.tool == Tool::Crop)
+        {
+            if self.typing.is_some() {
+                // A press elsewhere only finishes the text.
+                self.finish_typing();
+            } else {
+                self.press(p, crop_screen, (at.x, at.y));
+            }
+        }
+        if response.dragged()
             && let Some(p) = pointer
-            && image_rect.contains(response.interact_pointer_pos().unwrap_or_default())
         {
-            self.drag = Some(Drag::new(self.tool, self.style(), p));
+            if let Some(drag) = &mut self.drag {
+                drag.move_to(p);
+            }
+            if let Some(c) = &mut self.cropping {
+                match c.grab {
+                    Some(e) => {
+                        if e.left {
+                            c.rect.0 = p.0;
+                        }
+                        if e.right {
+                            c.rect.2 = p.0;
+                        }
+                        if e.top {
+                            c.rect.1 = p.1;
+                        }
+                        if e.bottom {
+                            c.rect.3 = p.1;
+                        }
+                    }
+                    None => (c.rect.2, c.rect.3) = p,
+                }
+            }
         }
-        if let (Some(drag), Some(p)) = (&mut self.drag, pointer) {
-            drag.move_to(view::clamp(p, shown));
-        }
-        if response.drag_stopped()
-            && let Some(drag) = self.drag.take()
-        {
-            let shape = drag.shape(shift);
-            if !shape.is_click() {
-                self.doc.add(shape);
+        if response.drag_stopped() {
+            if let Some(drag) = self.drag.take() {
+                let shape = drag.shape(shift);
+                if !shape.is_click() {
+                    self.doc.add(shape);
+                }
+            }
+            if let Some(c) = &mut self.cropping {
+                c.grab = None;
+                c.rect = normalized(c.rect);
+                if c.rect.2 - c.rect.0 < 2.0 || c.rect.3 - c.rect.1 < 2.0 {
+                    self.cropping = None;
+                }
             }
         }
 
-        // Finished shapes are in the texture; only the one being drawn is
-        // painted here.
+        // Finished shapes are in the texture; only the one being drawn, the
+        // caret and the crop frame are painted here.
         if let Some(live) = self.drag.as_ref().map(|d| d.shape(shift)) {
             for prim in geometry(&live) {
                 paint(&painter, &prim, fit.scale, to_pos);
             }
         }
+        if let Some(t) = &self.typing {
+            let size = text_size(self.style().width);
+            let lines = text::layout(&t.text, size).lines;
+            let row = lines.len().saturating_sub(1) as f32;
+            let x = t.at.0 + lines.last().copied().unwrap_or(0.0);
+            let y = t.at.1 + row * text::line_height(size);
+            let on = (ui.input(|i| i.time) * 2.0) as i64 % 2 == 0;
+            if on {
+                let [r, g, b] = self.style().color;
+                painter.line_segment(
+                    [to_pos((x, y)), to_pos((x, y + text::line_height(size)))],
+                    Stroke::new(1.5, Color32::from_rgb(r, g, b)),
+                );
+            }
+            ui.ctx().request_repaint_after(CARET_BLINK);
+        }
+        if let Some(c) = &self.cropping {
+            let (cx0, cy0, cx1, cy1) = crop_screen(c.rect);
+            let inner = Rect::from_min_max(Pos2::new(cx0, cy0), Pos2::new(cx1, cy1));
+            let dim = Color32::from_black_alpha(128);
+            let outer = image_rect;
+            for r in [
+                Rect::from_min_max(outer.min, Pos2::new(outer.max.x, inner.min.y)),
+                Rect::from_min_max(Pos2::new(outer.min.x, inner.max.y), outer.max),
+                Rect::from_min_max(
+                    Pos2::new(outer.min.x, inner.min.y),
+                    Pos2::new(inner.min.x, inner.max.y),
+                ),
+                Rect::from_min_max(
+                    Pos2::new(inner.max.x, inner.min.y),
+                    Pos2::new(outer.max.x, inner.max.y),
+                ),
+            ] {
+                painter.rect_filled(r, 0.0, dim);
+            }
+            painter.rect_stroke(
+                inner,
+                0.0,
+                Stroke::new(1.0, Color32::WHITE),
+                StrokeKind::Inside,
+            );
+            if let Some(hover) = response.hover_pos()
+                && let Some(e) = crop_edges((cx0, cy0, cx1, cy1), (hover.x, hover.y), CROP_GRAB)
+            {
+                ui.ctx().set_cursor_icon(resize_icon(e));
+            }
+        }
     }
+
+    /// A press on the canvas at image point `p` (screen point `at`).
+    fn press(
+        &mut self,
+        p: P,
+        crop_screen: impl Fn((f32, f32, f32, f32)) -> (f32, f32, f32, f32),
+        at: P,
+    ) {
+        match self.tool {
+            Tool::Text => {
+                self.typing = Some(Typing {
+                    at: p,
+                    text: String::new(),
+                });
+            }
+            Tool::Number => {
+                let number = self.doc.next_number();
+                self.doc.add(Shape {
+                    tool: Tool::Number,
+                    style: self.style(),
+                    points: vec![p],
+                    text: number.to_string(),
+                });
+            }
+            Tool::Crop => {
+                let grab = self
+                    .cropping
+                    .as_ref()
+                    .and_then(|c| crop_edges(crop_screen(c.rect), at, CROP_GRAB));
+                match (grab, &mut self.cropping) {
+                    (Some(e), Some(c)) => c.grab = Some(e),
+                    _ => {
+                        self.cropping = Some(CropEdit {
+                            rect: (p.0, p.1, p.0, p.1),
+                            grab: None,
+                        });
+                    }
+                }
+            }
+            _ => self.drag = Some(Drag::new(self.tool, self.style(), p)),
+        }
+    }
+
+    fn set_tool(&mut self, tool: Tool) {
+        if tool != self.tool {
+            self.finish_typing();
+            self.cropping = None;
+        }
+        self.tool = tool;
+    }
+
+    /// While typing every key edits the text; nothing else reacts.
+    fn type_keys(&mut self, ctx: &egui::Context) {
+        let events = ctx.input_mut(|i| std::mem::take(&mut i.events));
+        for event in events {
+            match event {
+                egui::Event::Text(s) => {
+                    if let Some(t) = &mut self.typing {
+                        t.text.extend(s.chars().filter(|c| !c.is_control()));
+                    }
+                }
+                egui::Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } => match key {
+                    Key::Backspace => {
+                        if let Some(t) = &mut self.typing {
+                            t.text.pop();
+                        }
+                    }
+                    Key::Enter if modifiers.shift => {
+                        if let Some(t) = &mut self.typing {
+                            t.text.push('\n');
+                        }
+                    }
+                    Key::Enter => self.finish_typing(),
+                    Key::Escape => self.typing = None,
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+    }
+
+    fn finish_typing(&mut self) {
+        if let Some(t) = self.typing.take()
+            && !t.text.trim().is_empty()
+        {
+            self.doc.add(Shape {
+                tool: Tool::Text,
+                style: self.style(),
+                points: vec![t.at],
+                text: t.text,
+            });
+        }
+    }
+
+    fn apply_crop(&mut self) {
+        let Some(c) = self.cropping.take() else {
+            return;
+        };
+        let (x0, y0, x1, y1) = normalized(c.rect);
+        let (x0, y0, x1, y1) = (x0.floor(), y0.floor(), x1.ceil(), y1.ceil());
+        if x1 - x0 >= 2.0 && y1 - y0 >= 2.0 {
+            self.doc.add_crop(PixelRect {
+                x: x0 as u32,
+                y: y0 as u32,
+                width: (x1 - x0) as u32,
+                height: (y1 - y0) as u32,
+            });
+        }
+    }
+}
+
+/// How close (screen px) a press must be to grab a crop edge.
+const CROP_GRAB: f32 = 8.0;
+const CARET_BLINK: Duration = Duration::from_millis(500);
+
+/// A text being typed, at its top-left in image px.
+struct Typing {
+    at: P,
+    text: String,
+}
+
+/// A crop being drawn or adjusted, in image px (x0, y0, x1, y1).
+struct CropEdit {
+    rect: (f32, f32, f32, f32),
+    grab: Option<Edges>,
+}
+
+/// Which edges of the crop rectangle a press grabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Edges {
+    left: bool,
+    right: bool,
+    top: bool,
+    bottom: bool,
+}
+
+/// The edges of `r` (x0, y0, x1, y1 on screen) within `tolerance` of `p`;
+/// `None` inside, outside, or far from every edge.
+fn crop_edges(r: (f32, f32, f32, f32), p: P, tolerance: f32) -> Option<Edges> {
+    let (x0, y0, x1, y1) = r;
+    let within_x = p.0 > x0 - tolerance && p.0 < x1 + tolerance;
+    let within_y = p.1 > y0 - tolerance && p.1 < y1 + tolerance;
+    let e = Edges {
+        left: within_y && (p.0 - x0).abs() <= tolerance,
+        right: within_y && (p.0 - x1).abs() <= tolerance,
+        top: within_x && (p.1 - y0).abs() <= tolerance,
+        bottom: within_x && (p.1 - y1).abs() <= tolerance,
+    };
+    (e.left || e.right || e.top || e.bottom).then_some(e)
+}
+
+fn resize_icon(e: Edges) -> egui::CursorIcon {
+    match (e.left || e.right, e.top || e.bottom) {
+        (true, false) => egui::CursorIcon::ResizeHorizontal,
+        (false, true) => egui::CursorIcon::ResizeVertical,
+        _ if (e.left && e.top) || (e.right && e.bottom) => egui::CursorIcon::ResizeNwSe,
+        _ => egui::CursorIcon::ResizeNeSw,
+    }
+}
+
+/// `r` with x0 ≤ x1 and y0 ≤ y1.
+fn normalized(r: (f32, f32, f32, f32)) -> (f32, f32, f32, f32) {
+    (r.0.min(r.2), r.1.min(r.3), r.0.max(r.2), r.1.max(r.3))
 }
 
 /// Consumes presses of `key` with `modifiers` (extra Shift and Alt ignored,
@@ -481,5 +763,36 @@ mod tests {
         let mut plain = vec![key(Key::S, Modifiers::NONE, false)];
         assert!(!take_press(&mut plain, Modifiers::COMMAND, Key::S));
         assert_eq!(plain.len(), 1, "other events stay");
+    }
+
+    #[test]
+    fn crop_edges_near_edges_and_corners() {
+        let r = (100.0, 100.0, 300.0, 200.0);
+        let e = |l, r_, t, b| {
+            Some(Edges {
+                left: l,
+                right: r_,
+                top: t,
+                bottom: b,
+            })
+        };
+        assert_eq!(
+            crop_edges(r, (102.0, 150.0), 8.0),
+            e(true, false, false, false)
+        );
+        assert_eq!(
+            crop_edges(r, (295.0, 150.0), 8.0),
+            e(false, true, false, false)
+        );
+        assert_eq!(
+            crop_edges(r, (200.0, 205.0), 8.0),
+            e(false, false, false, true)
+        );
+        assert_eq!(
+            crop_edges(r, (99.0, 101.0), 8.0),
+            e(true, false, true, false)
+        );
+        assert_eq!(crop_edges(r, (200.0, 150.0), 8.0), None, "inside");
+        assert_eq!(crop_edges(r, (50.0, 150.0), 8.0), None, "outside");
     }
 }
