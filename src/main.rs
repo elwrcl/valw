@@ -1,6 +1,3 @@
-// Window-mode helpers land before main uses them; Task 2 removes this.
-#![allow(dead_code)]
-
 mod capture;
 mod config;
 mod detach;
@@ -20,6 +17,7 @@ mod selection;
 mod stack;
 mod thumbnail;
 mod wayland;
+mod window;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -59,6 +57,11 @@ enum Command {
         #[command(flatten)]
         common: Common,
     },
+    /// Click a window to capture it (Cmd+Shift+4, then Space).
+    Window {
+        #[command(flatten)]
+        common: Common,
+    },
     /// Report what the compositor and system support.
     Doctor,
     /// Internal: the process that shows preview thumbnails.
@@ -91,9 +94,14 @@ fn parse_delay(s: &str) -> Result<Duration, String> {
         .map_err(|_| format!("must be a non-negative number of seconds: {s}"))
 }
 
+/// (image, output name for the file name) pairs, which one goes to the
+/// clipboard, and the output the preview appears on.
+type Shots = (Vec<(RgbaImage, Option<String>)>, usize, String);
+
 enum Mode {
     Screen { all: bool },
     Region,
+    Window,
 }
 
 fn main() -> ExitCode {
@@ -126,6 +134,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::PreviewHost => host::run(),
         Command::Screen { all, common } => capture(Mode::Screen { all }, common),
         Command::Region { common } => capture(Mode::Region, common),
+        Command::Window { common } => capture(Mode::Window, common),
     }
 }
 
@@ -145,9 +154,7 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
     // Thumbnails from earlier captures must not end up in this one.
     let mut hide = ipc::HideGuard::new(&ipc::socket_path());
 
-    // (image, output name for the file name), which one goes to the
-    // clipboard, and the output the preview appears on.
-    let (shots, clip, source): (Vec<(RgbaImage, Option<String>)>, usize, String) = match mode {
+    let (shots, clip, source): Shots = match mode {
         Mode::Screen { all } => {
             let focused = focused_output(&outputs);
             let source = outputs[focused].geom.name.clone();
@@ -169,6 +176,7 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
             let source = frames[i].output.name.clone();
             (vec![(frames[i].to_rgba(r), None)], 0, source)
         }
+        Mode::Window => window_shot(&outputs, cursor)?,
     };
     drop(wl);
 
@@ -193,6 +201,14 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
         output::copy_to_clipboard(png, lock)?;
     }
     Ok(())
+}
+
+/// A window shot, shaped like the other modes' results. The preview goes to
+/// the window's output, or niri's focused one if that is unknown.
+fn window_shot(outputs: &[wayland::Output], cursor: bool) -> Result<Shots> {
+    let (image, output) = window::capture(cursor)?;
+    let source = output.unwrap_or_else(|| outputs[focused_output(outputs)].geom.name.clone());
+    Ok((vec![(image, None)], 0, source))
 }
 
 /// Index of niri's focused output, or 0 if niri can't tell us.
@@ -284,6 +300,8 @@ mod tests {
         assert!(!parses(&["region", "--clipboard-only", "-o", "a.png"]));
         assert!(parses(&["region", "--no-preview"]));
         assert!(parses(&["screen", "--all", "--no-preview"]));
+        assert!(parses(&["window", "--cursor", "--delay", "2"]));
+        assert!(!parses(&["window", "--clipboard-only", "-o", "a.png"]));
     }
 
     #[test]
