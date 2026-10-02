@@ -121,20 +121,16 @@ fn pick(wl: &mut Wayland, output: &Output, initial: ToolbarState) -> Result<(Too
         outcome: None,
     });
     let result = wl.dispatch_blocking(|s| s.toolbar.as_ref().is_some_and(|t| t.outcome.is_some()));
-    let toolbar = wl.state.toolbar.take();
-    // The bar must be gone before anything is captured.
+    // Keep only the answer: dropping the toolbar destroys its surface, and
+    // the bar must be gone (flushed and round-tripped) before anything is
+    // captured.
+    let ended = wl.state.toolbar.take().map(|t| (t.state, t.outcome));
     let _ = wl.conn.flush();
     let _ = wl.queue.roundtrip(&mut wl.state);
     result?;
-    let toolbar = toolbar.context("the toolbar vanished")?;
-    match toolbar.outcome.flatten() {
-        Some(mode) => Ok((
-            ToolbarState {
-                mode,
-                ..toolbar.state
-            },
-            mode,
-        )),
+    let (state, outcome) = ended.context("the toolbar vanished")?;
+    match outcome.flatten() {
+        Some(mode) => Ok((ToolbarState { mode, ..state }, mode)),
         None => Err(Cancelled.into()),
     }
 }
