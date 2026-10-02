@@ -57,6 +57,7 @@ struct Editor {
     texture: egui::TextureHandle,
     /// The `Doc::revision` the texture shows.
     shown: u64,
+    toolbar_height: f32,
     doc: Doc,
     tool: Tool,
     color: usize,
@@ -79,6 +80,7 @@ impl Editor {
             base,
             texture,
             shown: 0,
+            toolbar_height: 0.0,
             doc: Doc::new(),
             tool: Tool::Arrow,
             color: 0,
@@ -220,7 +222,8 @@ impl Editor {
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
+        // Wraps onto a second row in narrow windows (niri's half-width columns).
+        ui.horizontal_wrapped(|ui| {
             for tool in Tool::ALL {
                 if ui
                     .selectable_label(self.tool == tool, tool.label())
@@ -405,7 +408,16 @@ impl eframe::App for Editor {
         let ctx = ui.ctx().clone();
         self.keys(&ctx);
         self.guard_close(&ctx);
-        egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
+        let toolbar = egui::Panel::top("toolbar").show(ui, |ui| {
+            self.toolbar(ui);
+            ui.min_rect().height()
+        });
+        // The panel takes its height from the last pass: when the toolbar
+        // wraps or unwraps, lay out again so no row is cut off.
+        if toolbar.inner != self.toolbar_height {
+            self.toolbar_height = toolbar.inner;
+            ctx.request_discard("toolbar height changed");
+        }
         if self.confirm_close && self.doc.is_dirty() {
             egui::Panel::bottom("unsaved").show(ui, |ui| {
                 ui.label("Unsaved changes — Esc to discard, Ctrl+S to save");
