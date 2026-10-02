@@ -116,3 +116,13 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - Every keystroke re-renders the whole image; fine at 1080p, may lag on 4K.
 - The pixelate drag preview is hard to see on white.
 - The unsaved bar mentions Ctrl+S, which is ignored while typing.
+
+## Toolbar (Phase 6)
+
+- [ ] `valw toolbar` shows the bar bottom-centre on the focused output (both monitors), crisp; the last mode is highlighted; hovering highlights buttons.
+- [ ] Screen, Window, Region and Zoom each start their mode at once; the bar is not in the shot.
+- [ ] Options ▾ opens the menu; timer None/5/10, Show cursor and Show preview toggle (✓) and are remembered next time (`~/.local/state/valw/toolbar.toml`).
+- [ ] With a 5 s timer the pill counts 5 → 1 bottom-centre, the desktop stays usable meanwhile, and the pill is not in the shot; clicking the pill cancels (exit 3).
+- [ ] Esc or a click beside the bar closes it without capturing (exit 3).
+- [ ] A broken `toolbar.toml` doesn't stop the bar (warning in the log, defaults used).
+- [ ] Bind it in niri (Mod+Shift+5 is taken in copland; pick a key).
