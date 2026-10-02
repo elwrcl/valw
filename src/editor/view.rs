@@ -17,9 +17,15 @@ impl Fit {
         let (iw, ih) = (image.0 as f32, image.1 as f32);
         let (x, y, w, h) = area;
         let scale = (w / iw).min(h / ih).min(1.0 / pixels_per_point);
+        // Centred, then onto a physical pixel boundary so that at 100 % each
+        // image pixel is exactly one screen pixel (no half-texel blur).
+        let snap = |v: f32| (v * pixels_per_point).floor() / pixels_per_point;
         Fit {
             scale,
-            offset: (x + (w - iw * scale) / 2.0, y + (h - ih * scale) / 2.0),
+            offset: (
+                snap(x + (w - iw * scale) / 2.0),
+                snap(y + (h - ih * scale) / 2.0),
+            ),
         }
     }
 
@@ -71,6 +77,16 @@ mod tests {
             f.scale, 0.5,
             "0.5 points per image px at 2× = 1 physical px"
         );
+    }
+
+    #[test]
+    fn the_image_sits_on_physical_pixels() {
+        // 1001 - 400 is odd: centring alone lands on half a pixel.
+        let f = Fit::new((400, 300), (0.0, 0.0, 1001.0, 801.0), 1.0);
+        assert_eq!(f.offset, (300.0, 250.0));
+        let g = Fit::new((400, 300), (0.0, 0.0, 1001.0, 801.0), 1.5);
+        let px = (g.offset.0 * 1.5, g.offset.1 * 1.5);
+        assert_eq!(px, (px.0.round(), px.1.round()), "{g:?}");
     }
 
     #[test]
