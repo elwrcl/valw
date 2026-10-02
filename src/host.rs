@@ -24,6 +24,7 @@ use wayland_client::{Connection, QueueHandle, protocol::wl_surface::WlSurface};
 use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::Shape;
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 
+use crate::config::{self, Backend};
 use crate::dnd::{self, Outcome};
 use crate::ipc::{self, Reply, Request};
 use crate::lock::Lock;
@@ -500,32 +501,79 @@ fn add(state: &mut State, path: &Path, output_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Opens the screenshot in Satty; saving there overwrites the file.
+/// The command that opens `path` in the configured editor; both save over
+/// the file.
+fn editor_command(backend: Backend, path: &Path, exe: &Path) -> std::process::Command {
+    let mut command = match backend {
+        Backend::Builtin => {
+            let mut c = std::process::Command::new(exe);
+            c.arg("edit").arg(path);
+            c
+        }
+        Backend::Satty => {
+            let mut c = std::process::Command::new("satty");
+            c.arg("--filename")
+                .arg(path)
+                .arg("--output-filename")
+                .arg(path);
+            c
+        }
+    };
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    command
+}
+
+/// Opens the screenshot in the configured editor.
 fn open_editor(path: &Path) {
     use std::os::unix::process::CommandExt;
-    use std::process::{Command, Stdio};
 
-    let mut command = Command::new("satty");
-    command
-        .arg("--filename")
-        .arg(path)
-        .arg("--output-filename")
-        .arg(path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    let backend = match config::load(&config::default_path()) {
+        Ok(c) => c.editor.backend,
+        Err(e) => {
+            tracing::warn!("using the built-in editor: {e:#}");
+            Backend::Builtin
+        }
+    };
+    let exe = std::env::current_exe().unwrap_or_else(|_| "valw".into());
+    let mut command = editor_command(backend, path, &exe);
     // SAFETY: setsid is async-signal-safe.
     unsafe {
         command.pre_exec(|| rustix::process::setsid().map(drop).map_err(Into::into));
     }
     if let Err(e) = command.spawn() {
-        tracing::warn!("could not start satty: {e}");
+        tracing::warn!("could not start the editor ({backend:?}): {e}");
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_command_per_backend() {
+        let path = Path::new("/p/Shot 1.png");
+        let exe = Path::new("/nix/store/x/bin/valw");
+        let builtin = editor_command(Backend::Builtin, path, exe);
+        assert_eq!(builtin.get_program(), exe);
+        assert_eq!(
+            builtin.get_args().collect::<Vec<_>>(),
+            ["edit", "/p/Shot 1.png"]
+        );
+        let satty = editor_command(Backend::Satty, path, exe);
+        assert_eq!(satty.get_program(), "satty");
+        assert_eq!(
+            satty.get_args().collect::<Vec<_>>(),
+            [
+                "--filename",
+                "/p/Shot 1.png",
+                "--output-filename",
+                "/p/Shot 1.png"
+            ]
+        );
+    }
 
     #[test]
     fn hidden_until_every_hider_leaves() {

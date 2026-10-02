@@ -12,6 +12,7 @@ pub struct Config {
     pub capture: Capture,
     pub preview: Preview,
     pub zoom: Zoom,
+    pub editor: Editor,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -49,6 +50,21 @@ impl Default for Zoom {
             flashlight_radius: 180.0,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[serde(default)]
+pub struct Editor {
+    pub backend: Backend,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Backend {
+    /// `valw edit`.
+    #[default]
+    Builtin,
+    Satty,
 }
 
 impl Default for Preview {
@@ -157,12 +173,12 @@ mod tests {
 
     #[test]
     fn unknown_keys_are_reported_not_rejected() {
-        let text = "[editor]\nbackend = \"satty\"\n\n[save]\nfolder = \"x\"\n";
+        let text = "[toolbar]\nposition = \"top\"\n\n[save]\nfolder = \"x\"\n";
         let (config, unknown) = parse(text).unwrap();
         assert_eq!(config, Config::default());
         assert_eq!(
             unknown,
-            vec!["editor".to_string(), "save.folder".to_string()]
+            vec!["save.folder".to_string(), "toolbar".to_string()]
         );
     }
 
@@ -218,6 +234,14 @@ mod tests {
             err.to_string(),
             "zoom.flashlight_radius must be between 20 and 2000"
         );
+    }
+
+    #[test]
+    fn editor_backend_default_and_values() {
+        assert_eq!(Config::default().editor.backend, Backend::Builtin);
+        let (config, _) = parse("[editor]\nbackend = \"satty\"\n").unwrap();
+        assert_eq!(config.editor.backend, Backend::Satty);
+        assert!(parse("[editor]\nbackend = \"gimp\"\n").is_err());
     }
 
     #[test]
