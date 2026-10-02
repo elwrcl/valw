@@ -221,7 +221,9 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
     // Thumbnails from earlier captures must not end up in this one.
     let mut hide = ipc::HideGuard::new(&ipc::socket_path());
 
-    let (shots, clip, source): Shots = match mode {
+    // Window shots get their (slow) shadow after the shutter sound.
+    let mut windowed = false;
+    let (mut shots, clip, source): Shots = match mode {
         Mode::Screen { all } => {
             let focused = focused_output(&outputs);
             let source = outputs[focused].geom.name.clone();
@@ -246,11 +248,15 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
                 }
                 region::Choice::Window => {
                     drop(frames);
-                    window_shot(&outputs, cursor, config.capture.window_shadow)?
+                    windowed = true;
+                    window_shot(&outputs, cursor)?
                 }
             }
         }
-        Mode::Window => window_shot(&outputs, cursor, config.capture.window_shadow)?,
+        Mode::Window => {
+            windowed = true;
+            window_shot(&outputs, cursor)?
+        }
         Mode::Zoom => {
             let focused = focused_output(&outputs);
             let frame = wl.capture(&outputs[focused..=focused], cursor)?.remove(0);
@@ -267,6 +273,11 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
         }
     };
     sound::play(&config.sound, sound);
+    if windowed && config.capture.window_shadow {
+        for (image, _) in &mut shots {
+            *image = shadow::add(image);
+        }
+    }
     drop(wl);
 
     let target = Target::from_args(common.output, common.clipboard_only);
@@ -293,9 +304,8 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
 
 /// A window shot, shaped like the other modes' results. The preview goes to
 /// the window's output, or niri's focused one if that is unknown.
-fn window_shot(outputs: &[wayland::Output], cursor: bool, shadow: bool) -> Result<Shots> {
+fn window_shot(outputs: &[wayland::Output], cursor: bool) -> Result<Shots> {
     let (image, output) = window::capture(cursor)?;
-    let image = if shadow { shadow::add(&image) } else { image };
     let source = output.unwrap_or_else(|| outputs[focused_output(outputs)].geom.name.clone());
     Ok((vec![(image, None)], 0, source))
 }

@@ -19,7 +19,7 @@ pub fn add(image: &RgbaImage) -> RgbaImage {
             alpha[(sy * cw + sx) as usize] = p.0[3] as f32 / 255.0;
         }
     }
-    // Three box blurs approximate a Gaussian of about BLUR / 2 sigma.
+    // Three box blurs approximate a Gaussian (visible extent about BLUR px).
     let r = (BLUR / 3).max(1) as usize;
     for _ in 0..3 {
         alpha = box_blur(&alpha, cw as usize, ch as usize, r);
@@ -69,17 +69,27 @@ fn box_blur(src: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
             }
         }
     }
+    // Vertically with a running sum per column, walking rows so memory is
+    // read in order.
     let mut out = vec![0f32; src.len()];
-    for x in 0..w {
-        let at = |y: usize| tmp[y * w + x];
-        let mut sum: f32 = (0..=r.min(h - 1)).map(at).sum();
-        for y in 0..h {
-            out[y * w + x] = sum / n;
-            if y + r + 1 < h {
-                sum += at(y + r + 1);
+    let mut sums = vec![0f32; w];
+    for y in 0..=r.min(h - 1) {
+        for (sum, v) in sums.iter_mut().zip(&tmp[y * w..(y + 1) * w]) {
+            *sum += v;
+        }
+    }
+    for y in 0..h {
+        for (o, sum) in out[y * w..(y + 1) * w].iter_mut().zip(&sums) {
+            *o = sum / n;
+        }
+        if y + r + 1 < h {
+            for (sum, v) in sums.iter_mut().zip(&tmp[(y + r + 1) * w..(y + r + 2) * w]) {
+                *sum += v;
             }
-            if y >= r {
-                sum -= at(y - r);
+        }
+        if y >= r {
+            for (sum, v) in sums.iter_mut().zip(&tmp[(y - r) * w..(y - r + 1) * w]) {
+                *sum -= v;
             }
         }
     }
