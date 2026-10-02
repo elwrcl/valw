@@ -11,7 +11,8 @@ pub const MIN_RADIUS: f64 = 20.0;
 pub const MAX_RADIUS: f64 = 2000.0;
 /// Logical px of touchpad scrolling per zoom step.
 const TOUCHPAD_PX_PER_STEP: f64 = 15.0;
-/// Per second: 1 - e^(-RATE * 0.12) ≈ 0.9, 90 % of the way in 120 ms.
+/// Per second: 1 - e^(-RATE * 0.12) ≈ 0.9, 90 % of the way in 120 ms
+/// (measured in the visible span, 1 / scale).
 const RATE: f64 = 19.2;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -115,7 +116,9 @@ impl Animated {
         let k = 1.0 - (-RATE * dt).exp();
         let (s, t) = (&mut self.shown, self.target);
         let lerp = |a: f64, b: f64| a + (b - a) * k;
-        s.scale = lerp(s.scale, t.scale);
+        // Easing the visible span (1 / scale) and the origin together keeps
+        // the frame point under the pointer still the whole way.
+        s.scale = 1.0 / lerp(1.0 / s.scale, 1.0 / t.scale);
         s.origin = (lerp(s.origin.0, t.origin.0), lerp(s.origin.1, t.origin.1));
         let settled = (s.scale - t.scale).abs() < 1e-3
             && (s.origin.0 - t.origin.0).abs() < 0.05
@@ -228,14 +231,29 @@ mod tests {
             assert!(frames < 120, "never settles");
         }
         assert_eq!(a.shown, a.target);
-        // About 90 % of the way after 120 ms.
+        // About 90 % of the way after 120 ms, in the visible span (1 / scale).
         let mut b = Animated::new();
         b.target = View {
             scale: 11.0,
             origin: (0.0, 0.0),
         };
         b.step(0.12);
-        assert!((b.shown.scale - 10.0).abs() < 0.2, "{:?}", b.shown);
+        let span = 1.0 / b.shown.scale;
+        let expected = 1.0 + 0.9 * (1.0 / 11.0 - 1.0);
+        assert!((span - expected).abs() < 0.02, "{:?}", b.shown);
+    }
+
+    #[test]
+    fn animation_keeps_the_point_under_the_pointer() {
+        for p in [(960.0, 540.0), (100.0, 900.0)] {
+            let mut a = Animated::new();
+            a.target = View::IDENTITY.zoom_at(p, 2.0, SIZE);
+            let anchor = a.target.to_frame(p);
+            for _ in 0..5 {
+                a.step(0.02);
+                assert!(close(a.shown.to_frame(p), anchor), "{p:?}: {:?}", a.shown);
+            }
+        }
     }
 
     #[test]
