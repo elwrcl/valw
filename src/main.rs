@@ -1,3 +1,6 @@
+// Window-mode helpers land before main uses them; Task 2 removes this.
+#![allow(dead_code)]
+
 mod capture;
 mod config;
 mod detach;
