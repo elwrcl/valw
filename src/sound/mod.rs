@@ -17,13 +17,16 @@ fn runtime_dir() -> PathBuf {
         .unwrap_or_else(std::env::temp_dir)
 }
 
-/// The WAV for shot `n`, written into `dir` the first time.
+/// The WAV for shot `n` in `dir`, (re)written whenever it differs from
+/// what this build synthesises: a few milliseconds, and a tuned synth or a
+/// broken file never lingers.
 fn cached(dir: &Path, n: u8) -> Result<PathBuf> {
     let path = dir.join(format!("{n}.wav"));
-    if !path.exists() {
+    let wav = synth::wav(&synth::sound(n));
+    if std::fs::read(&path).ok().as_deref() != Some(wav.as_slice()) {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("could not create {}", dir.display()))?;
-        crate::output::write_atomic(&path, &synth::wav(&synth::sound(n)))?;
+        crate::output::write_atomic(&path, &wav)?;
     }
     Ok(path)
 }
@@ -78,6 +81,14 @@ pub fn demo(config: &config::Sound) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stale_or_broken_file_is_rewritten() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("3.wav"), b"an older synth").unwrap();
+        let path = cached(dir.path(), 3).unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), synth::wav(&synth::sound(3)));
+    }
 
     #[test]
     fn the_cache_holds_seven_wavs() {
