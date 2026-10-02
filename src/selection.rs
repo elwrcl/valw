@@ -47,11 +47,15 @@ pub enum Selection {
 }
 
 impl Selection {
+    /// A press with no modifiers held (tests use it).
+    #[cfg(test)]
     pub fn press(&mut self, p: Point) {
-        let mods = match self {
-            Selection::Dragging(d) => d.mods,
-            Selection::Idle => Mods::default(),
-        };
+        self.press_with(p, Mods::default());
+    }
+
+    /// Starts a drag with `mods` already held. A held Shift doesn't lock an
+    /// axis yet: there is nothing to keep until the selection has a size.
+    pub fn press_with(&mut self, p: Point, mods: Mods) {
         *self = Selection::Dragging(Drag {
             start: p,
             end: p,
@@ -70,6 +74,13 @@ impl Selection {
                 x: d.start.x + dx,
                 y: d.start.y + dy,
             };
+            // A Shift lock moves along, or releasing Space would snap back.
+            if let Some((frozen, _)) = &mut d.lock {
+                *frozen = Point {
+                    x: frozen.x + dx,
+                    y: frozen.y + dy,
+                };
+            }
             d.end = Point {
                 x: d.end.x + dx,
                 y: d.end.y + dy,
@@ -432,6 +443,42 @@ mod tests {
         s.set_mods(Mods::default());
         s.motion(pt(55.0, 40.0));
         assert_eq!(s.corners(), Some((pt(5.0, 0.0), pt(55.0, 40.0))));
+    }
+
+    #[test]
+    fn moving_with_space_carries_the_shift_lock_along() {
+        let mut s = Selection::default();
+        s.press(pt(0.0, 0.0));
+        s.motion(pt(40.0, 30.0));
+        s.set_mods(SHIFT);
+        s.motion(pt(60.0, 31.0)); // axis X
+        s.set_mods(Mods {
+            shift: true,
+            alt: false,
+            space: true,
+        });
+        s.motion(pt(60.0, 131.0)); // moved 100 down
+        assert_eq!(s.corners(), Some((pt(0.0, 100.0), pt(60.0, 130.0))));
+        s.set_mods(SHIFT);
+        s.motion(pt(70.0, 131.0));
+        assert_eq!(
+            s.corners(),
+            Some((pt(0.0, 100.0), pt(70.0, 130.0))),
+            "no jump back"
+        );
+    }
+
+    #[test]
+    fn shift_held_at_the_press_does_not_freeze_the_press_point() {
+        let mut s = Selection::default();
+        s.press_with(pt(10.0, 10.0), SHIFT);
+        s.set_mods(SHIFT);
+        s.motion(pt(60.0, 40.0));
+        assert_eq!(
+            s.corners(),
+            Some((pt(10.0, 10.0), pt(60.0, 40.0))),
+            "a real rectangle"
+        );
     }
 
     #[test]

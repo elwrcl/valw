@@ -309,9 +309,8 @@ impl Overlay {
                 PointerEventKind::Press {
                     button: BTN_LEFT, ..
                 } => {
-                    self.selection.press(p);
                     // Modifiers already held apply from the start.
-                    self.selection.set_mods(self.mods);
+                    self.selection.press_with(p, self.mods);
                     self.anchor = Some(i);
                 }
                 PointerEventKind::Press {
