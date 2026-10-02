@@ -144,3 +144,12 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - [ ] `[capture] window_shadow = true`: window shots get a soft shadow following the rounded corners; preview, clipboard and file all have it.
 - [ ] Shots in quick succession play sounds 1 → 5 getting faster and brighter, then 6, 7, 6, 7 rising endlessly; after a 5 s pause it starts at 1 again. `valw __combo-demo` plays the whole sequence for tuning.
 - [ ] `[sound] enabled = false`, `volume`, `combo_reset_secs` take effect; the toolbar's Play sound option overrides the config; no `pw-play` → no sound, capture still works (warning in the log).
+
+### Known minors (deferred from the polish review)
+
+- Releasing Shift mid-drag only updates the rectangle on the next pointer motion.
+- The Shift axis is decided by the very first motion; a few pixels of threshold would feel steadier.
+- `__combo-demo` and a capture regenerating the same WAV at once can race on the temp file (one silent shot).
+- Without `XDG_RUNTIME_DIR` the sound cache and combo state in `/tmp` are shared between users.
+- `pipewire` on the wrapper's PATH adds its whole closure to the package.
+- Tuning by ear: shots 6–7 are about 9–10 dB louder than 1–5; adjust with `__combo-demo`.
