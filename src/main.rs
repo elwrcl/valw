@@ -1,6 +1,3 @@
-// The editor lands in pieces; Task 4 removes this.
-#![allow(dead_code)]
-
 mod capture;
 mod config;
 mod detach;
@@ -72,11 +69,19 @@ enum Command {
         #[command(flatten)]
         common: Common,
     },
+    /// Mark up an image (opened by clicking a preview).
+    Edit {
+        /// The image to edit.
+        file: PathBuf,
+    },
     /// Report what the compositor and system support.
     Doctor,
     /// Internal: the process that shows preview thumbnails.
     #[command(name = "__preview-host", hide = true)]
     PreviewHost,
+    /// Internal: serve a PNG from stdin as the clipboard (the editor's copy).
+    #[command(name = "__clipboard", hide = true)]
+    Clipboard,
 }
 
 #[derive(Args)]
@@ -147,6 +152,13 @@ fn run(cli: Cli) -> Result<()> {
         Command::Region { common } => capture(Mode::Region, common),
         Command::Window { common } => capture(Mode::Window, common),
         Command::Zoom { common } => capture(Mode::Zoom, common),
+        Command::Edit { file } => editor::run(&file),
+        Command::Clipboard => {
+            let mut png = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::stdin(), &mut png)
+                .context("could not read the image")?;
+            output::serve_clipboard(png)
+        }
     }
 }
 
@@ -337,6 +349,9 @@ mod tests {
         assert!(!parses(&["window", "--clipboard-only", "-o", "a.png"]));
         assert!(parses(&["zoom", "--cursor", "--no-preview"]));
         assert!(!parses(&["zoom", "--clipboard-only", "-o", "a.png"]));
+        assert!(parses(&["edit", "a.png"]));
+        assert!(!parses(&["edit"]));
+        assert!(parses(&["__clipboard"]));
     }
 
     #[test]
@@ -344,6 +359,7 @@ mod tests {
         assert!(parses(&["__preview-host"]));
         let help = Cli::command().render_help().to_string();
         assert!(!help.contains("preview-host"), "{help}");
+        assert!(!help.contains("__clipboard"), "{help}");
     }
 
     #[test]

@@ -33,12 +33,21 @@
         # Tests run through `nix flake check` instead.
         doCheck = false;
 
-        # Clicking a preview opens Satty. --suffix keeps a user's own Satty first.
-        # Zoom loads libEGL.so.1 (libglvnd); Mesa's drivers come from the system.
+        # Clicking a preview opens Satty if configured. --suffix keeps a user's own Satty first.
         postInstall = ''
-          wrapProgram $out/bin/valw \
-            --suffix PATH : ${lib.makeBinPath [ pkgs.satty ]} \
-            --suffix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ pkgs.libglvnd ]}
+          wrapProgram $out/bin/valw --suffix PATH : ${lib.makeBinPath [ pkgs.satty ]}
+        '';
+
+        # dlopen()ed at run time: libwayland (winit, valw), libxkbcommon (winit),
+        # libEGL (zoom, editor; Mesa's drivers come from the system).
+        postFixup = ''
+          patchelf --add-rpath ${
+            lib.makeLibraryPath [
+              pkgs.wayland
+              pkgs.libxkbcommon
+              pkgs.libglvnd
+            ]
+          } $out/bin/.valw-wrapped
         '';
 
         meta = {

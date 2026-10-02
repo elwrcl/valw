@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Local};
 use image::{ImageFormat, RgbaImage};
-use wl_clipboard_rs::copy::{MimeType, Options, Source};
+use wl_clipboard_rs::copy::{MimeType, Options, PreparedCopy, Source};
 
 use crate::error::HintExt;
 use crate::lock::Lock;
@@ -90,21 +90,33 @@ pub fn write_stdout(bytes: &[u8]) -> Result<()> {
         .context("could not write to stdout")
 }
 
-/// Copies `png` to the clipboard. The data is served by a forked child that
-/// lives until something else is copied, so this consumes the lock.
-pub fn copy_to_clipboard(png: Vec<u8>, lock: Lock) -> Result<()> {
+fn prepare_clipboard(png: Vec<u8>) -> Result<PreparedCopy> {
     let mut options = Options::new();
     options.foreground(true);
-    let prepared = options
+    options
         .prepare_copy(
             Source::Bytes(png.into()),
             MimeType::Specific("image/png".into()),
         )
         .context("could not copy to the clipboard")
-        .hint("the compositor needs ext-data-control or wlr-data-control; see `valw doctor`")?;
+        .hint("the compositor needs ext-data-control or wlr-data-control; see `valw doctor`")
+}
+
+/// Copies `png` to the clipboard. The data is served by a forked child that
+/// lives until something else is copied, so this consumes the lock.
+pub fn copy_to_clipboard(png: Vec<u8>, lock: Lock) -> Result<()> {
+    let prepared = prepare_clipboard(png)?;
     crate::detach::spawn(lock, move || {
         let _ = prepared.serve();
     })
+}
+
+/// Serves `png` as the clipboard from this process until something else
+/// takes the clipboard.
+pub fn serve_clipboard(png: Vec<u8>) -> Result<()> {
+    prepare_clipboard(png)?
+        .serve()
+        .context("the clipboard server failed")
 }
 
 /// Where a capture goes.

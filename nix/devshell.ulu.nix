@@ -1,7 +1,7 @@
 { ... }:
 {
   perSystem =
-    { pkgs, self', ... }:
+    { pkgs, lib, self', ... }:
     {
       devShells.default = pkgs.mkShell {
         inputsFrom = [ self'.packages.default ];
@@ -15,6 +15,13 @@
           grim
           imagemagick
           wayland-utils
+        ];
+
+        # What the package gets through its RUNPATH, for `cargo run`.
+        LD_LIBRARY_PATH = lib.makeLibraryPath [
+          pkgs.wayland
+          pkgs.libxkbcommon
+          pkgs.libglvnd
         ];
 
         # The repo is a path: flake, so Nix copies the whole tree on every
