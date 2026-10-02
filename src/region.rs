@@ -3,7 +3,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use smithay_client_toolkit::{
     compositor::FrameCallbackData,
-    seat::pointer::{BTN_LEFT, BTN_RIGHT, PointerEvent, PointerEventKind},
+    seat::{
+        keyboard::Modifiers,
+        pointer::{BTN_LEFT, BTN_RIGHT, PointerEvent, PointerEventKind},
+    },
     shell::{
         WaylandSurface,
         wlr_layer::{Anchor, KeyboardInteractivity, Layer, LayerSurface},
@@ -25,7 +28,7 @@ use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use crate::error::{Cancelled, HintExt};
 use crate::frame::{Bgrx, Frame, OutputGeom, PixelRect};
 use crate::render;
-use crate::selection::{self, Point, Selection};
+use crate::selection::{self, Mods, Point, Selection};
 use crate::wayland::{Output, State, Wayland};
 
 pub const NAMESPACE: &str = "valw-overlay";
@@ -45,6 +48,8 @@ pub struct Overlay {
     selection: Selection,
     /// Output where the current drag started; the capture is clipped to it.
     anchor: Option<usize>,
+    /// Shift, Alt and Space as the keyboard last reported them.
+    mods: Mods,
     outcome: Option<Option<Choice>>,
 }
 
@@ -106,6 +111,7 @@ pub fn select(wl: &mut Wayland, outputs: &[Output], frames: &[Frame]) -> Result<
         surfaces,
         selection: Selection::default(),
         anchor: None,
+        mods: Mods::default(),
         outcome: None,
     });
     let result = wl.dispatch_blocking(|s| s.overlay.as_ref().is_some_and(|o| o.outcome.is_some()));
@@ -169,6 +175,30 @@ impl Overlay {
         self.outcome.get_or_insert(None);
     }
 
+    pub fn modifiers(&mut self, m: Modifiers, qh: &QueueHandle<State>) {
+        self.mods.shift = m.shift;
+        self.mods.alt = m.alt;
+        self.apply_mods(qh);
+    }
+
+    /// Space before a drag switches to window mode; during one it moves
+    /// the selection while held.
+    pub fn space(&mut self, down: bool, qh: &QueueHandle<State>) {
+        if down && self.selection.allows_window_switch() {
+            self.switch_to_window();
+            return;
+        }
+        self.mods.space = down;
+        self.apply_mods(qh);
+    }
+
+    fn apply_mods(&mut self, qh: &QueueHandle<State>) {
+        self.selection.set_mods(self.mods);
+        if let Some(a) = self.anchor {
+            self.redraw(a, qh);
+        }
+    }
+
     pub fn switch_to_window(&mut self) {
         if self.selection.allows_window_switch() {
             tracing::info!("switching to window mode");
@@ -184,9 +214,7 @@ impl Overlay {
 
     /// The selection as drawn on surface `i`: only the anchor output shows it.
     fn selection_on(&self, i: usize) -> Option<PixelRect> {
-        let Selection::Dragging { start, end } = self.selection else {
-            return None;
-        };
+        let (start, end) = self.selection.corners()?;
         let s = &self.surfaces[i];
         (self.anchor == Some(i))
             .then(|| selection::clip(start, end, &s.geom, s.width, s.height))
@@ -255,6 +283,8 @@ impl Overlay {
                     button: BTN_LEFT, ..
                 } => {
                     self.selection.press(p);
+                    // Modifiers already held apply from the start.
+                    self.selection.set_mods(self.mods);
                     self.anchor = Some(i);
                 }
                 PointerEventKind::Press {

@@ -10,33 +10,138 @@ pub struct Point {
     pub y: f64,
 }
 
+/// Modifier keys that shape a selection while dragging.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Mods {
+    pub shift: bool,
+    pub alt: bool,
+    pub space: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Axis {
+    X,
+    Y,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Drag {
+    /// The press point (the centre with Alt); Space moves it.
+    start: Point,
+    /// The far corner before Alt is applied.
+    end: Point,
+    /// The last pointer position.
+    last: Point,
+    /// Added to the pointer to get `end` (non-zero after a Space move).
+    offset: (f64, f64),
+    mods: Mods,
+    /// Shift: `end` when Shift went down, and the axis that follows.
+    lock: Option<(Point, Option<Axis>)>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum Selection {
     #[default]
     Idle,
-    Dragging {
-        start: Point,
-        end: Point,
-    },
+    Dragging(Drag),
 }
 
 impl Selection {
     pub fn press(&mut self, p: Point) {
-        *self = Selection::Dragging { start: p, end: p };
+        let mods = match self {
+            Selection::Dragging(d) => d.mods,
+            Selection::Idle => Mods::default(),
+        };
+        *self = Selection::Dragging(Drag {
+            start: p,
+            end: p,
+            last: p,
+            offset: (0.0, 0.0),
+            mods,
+            lock: None,
+        });
     }
 
     pub fn motion(&mut self, p: Point) {
-        if let Selection::Dragging { end, .. } = self {
-            *end = p;
+        let Selection::Dragging(d) = self else { return };
+        if d.mods.space {
+            let (dx, dy) = (p.x - d.last.x, p.y - d.last.y);
+            d.start = Point {
+                x: d.start.x + dx,
+                y: d.start.y + dy,
+            };
+            d.end = Point {
+                x: d.end.x + dx,
+                y: d.end.y + dy,
+            };
+        } else {
+            let target = Point {
+                x: p.x + d.offset.0,
+                y: p.y + d.offset.1,
+            };
+            d.end = match &mut d.lock {
+                Some((frozen, axis)) => {
+                    let axis = *axis.get_or_insert_with(|| {
+                        if (target.x - frozen.x).abs() >= (target.y - frozen.y).abs() {
+                            Axis::X
+                        } else {
+                            Axis::Y
+                        }
+                    });
+                    match axis {
+                        Axis::X => Point {
+                            x: target.x,
+                            y: frozen.y,
+                        },
+                        Axis::Y => Point {
+                            x: frozen.x,
+                            y: target.y,
+                        },
+                    }
+                }
+                None => target,
+            };
+        }
+        d.last = p;
+    }
+
+    /// The keyboard's modifiers changed (also while idle, for the next drag).
+    pub fn set_mods(&mut self, mods: Mods) {
+        let Selection::Dragging(d) = self else { return };
+        if mods.shift && !d.mods.shift {
+            d.lock = Some((d.end, None));
+        } else if !mods.shift {
+            d.lock = None;
+        }
+        if d.mods.space && !mods.space {
+            // Resize again from where the corner is, not where the pointer is.
+            d.offset = (d.end.x - d.last.x, d.end.y - d.last.y);
+        }
+        d.mods = mods;
+    }
+
+    /// The selection's corners in global logical coordinates.
+    pub fn corners(&self) -> Option<(Point, Point)> {
+        let Selection::Dragging(d) = self else {
+            return None;
+        };
+        if d.mods.alt {
+            let opposite = Point {
+                x: 2.0 * d.start.x - d.end.x,
+                y: 2.0 * d.start.y - d.end.y,
+            };
+            Some((opposite, d.end))
+        } else {
+            Some((d.start, d.end))
         }
     }
 
-    /// Ends the drag and returns its start and end. Back to `Idle` either way.
+    /// Ends the drag at `p` and returns its corners. Back to `Idle` either way.
     pub fn release(&mut self, p: Point) -> Option<(Point, Point)> {
-        match std::mem::take(self) {
-            Selection::Dragging { start, .. } => Some((start, p)),
-            Selection::Idle => None,
-        }
+        self.motion(p);
+        let corners = self.corners();
+        *self = Selection::Idle;
+        corners
     }
 
     /// Space switches to window mode only before a drag starts.
@@ -211,17 +316,133 @@ mod tests {
 
         s.press(p(1.0, 2.0));
         s.motion(p(5.0, 6.0));
-        assert_eq!(
-            s,
-            Selection::Dragging {
-                start: p(1.0, 2.0),
-                end: p(5.0, 6.0)
-            }
-        );
+        assert_eq!(s.corners(), Some((p(1.0, 2.0), p(5.0, 6.0))));
         assert_eq!(s.release(p(7.0, 8.0)), Some((p(1.0, 2.0), p(7.0, 8.0))));
         assert_eq!(s, Selection::Idle);
 
         s.motion(p(9.0, 9.0));
+        assert_eq!(s, Selection::Idle);
+    }
+
+    fn pt(x: f64, y: f64) -> Point {
+        Point { x, y }
+    }
+
+    const SHIFT: Mods = Mods {
+        shift: true,
+        alt: false,
+        space: false,
+    };
+    const ALT: Mods = Mods {
+        shift: false,
+        alt: true,
+        space: false,
+    };
+    const SPACE: Mods = Mods {
+        shift: false,
+        alt: false,
+        space: true,
+    };
+
+    #[test]
+    fn plain_drag_is_press_to_pointer() {
+        let mut s = Selection::default();
+        s.press(pt(10.0, 10.0));
+        s.motion(pt(50.0, 30.0));
+        assert_eq!(s.corners(), Some((pt(10.0, 10.0), pt(50.0, 30.0))));
+    }
+
+    #[test]
+    fn shift_locks_the_dimension_that_moves_first() {
+        let mut s = Selection::default();
+        s.press(pt(0.0, 0.0));
+        s.motion(pt(40.0, 30.0));
+        s.set_mods(SHIFT);
+        s.motion(pt(60.0, 32.0)); // mostly horizontal: width follows
+        assert_eq!(s.corners(), Some((pt(0.0, 0.0), pt(60.0, 30.0))));
+        s.motion(pt(70.0, 90.0)); // the axis stays decided
+        assert_eq!(s.corners(), Some((pt(0.0, 0.0), pt(70.0, 30.0))));
+        s.set_mods(Mods::default());
+        s.motion(pt(70.0, 90.0));
+        assert_eq!(
+            s.corners(),
+            Some((pt(0.0, 0.0), pt(70.0, 90.0))),
+            "plain again"
+        );
+
+        let mut v = Selection::default();
+        v.press(pt(0.0, 0.0));
+        v.motion(pt(40.0, 30.0));
+        v.set_mods(SHIFT);
+        v.motion(pt(41.0, 80.0)); // mostly vertical: height follows
+        assert_eq!(v.corners(), Some((pt(0.0, 0.0), pt(40.0, 80.0))));
+    }
+
+    #[test]
+    fn alt_grows_from_the_centre() {
+        let mut s = Selection::default();
+        s.press(pt(100.0, 100.0));
+        s.set_mods(ALT);
+        s.motion(pt(130.0, 120.0));
+        assert_eq!(s.corners(), Some((pt(70.0, 80.0), pt(130.0, 120.0))));
+    }
+
+    #[test]
+    fn shift_and_alt_combine() {
+        let mut s = Selection::default();
+        s.press(pt(100.0, 100.0));
+        s.motion(pt(120.0, 110.0));
+        s.set_mods(Mods {
+            shift: true,
+            alt: true,
+            space: false,
+        });
+        s.motion(pt(150.0, 112.0));
+        assert_eq!(s.corners(), Some((pt(50.0, 90.0), pt(150.0, 110.0))));
+    }
+
+    #[test]
+    fn space_moves_then_resizing_continues_without_a_jump() {
+        let mut s = Selection::default();
+        s.press(pt(0.0, 0.0));
+        s.motion(pt(40.0, 30.0));
+        s.set_mods(SPACE);
+        s.motion(pt(50.0, 40.0));
+        assert_eq!(s.corners(), Some((pt(10.0, 10.0), pt(50.0, 40.0))));
+        s.motion(pt(60.0, 40.0));
+        assert_eq!(s.corners(), Some((pt(20.0, 10.0), pt(60.0, 40.0))));
+        s.set_mods(Mods::default());
+        s.motion(pt(60.0, 40.0));
+        assert_eq!(
+            s.corners(),
+            Some((pt(20.0, 10.0), pt(60.0, 40.0))),
+            "no jump on release"
+        );
+        s.motion(pt(70.0, 45.0));
+        assert_eq!(s.corners(), Some((pt(20.0, 10.0), pt(70.0, 45.0))));
+    }
+
+    #[test]
+    fn space_with_a_pointer_away_from_the_corner_keeps_the_offset() {
+        let mut s = Selection::default();
+        s.press(pt(0.0, 0.0));
+        s.motion(pt(40.0, 30.0));
+        s.set_mods(SPACE);
+        s.motion(pt(45.0, 30.0));
+        s.set_mods(Mods::default());
+        s.motion(pt(55.0, 40.0));
+        assert_eq!(s.corners(), Some((pt(5.0, 0.0), pt(55.0, 40.0))));
+    }
+
+    #[test]
+    fn release_applies_the_held_modifiers() {
+        let mut s = Selection::default();
+        s.press(pt(100.0, 100.0));
+        s.set_mods(ALT);
+        assert_eq!(
+            s.release(pt(110.0, 105.0)),
+            Some((pt(90.0, 95.0), pt(110.0, 105.0)))
+        );
         assert_eq!(s, Selection::Idle);
     }
 }

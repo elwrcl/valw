@@ -483,7 +483,7 @@ impl KeyboardHandler for State {
         if let Some(overlay) = &mut self.overlay {
             match event.keysym {
                 Keysym::Escape => overlay.cancel(),
-                Keysym::space => overlay.switch_to_window(),
+                Keysym::space => overlay.space(true, qh),
                 _ => {}
             }
         }
@@ -508,17 +508,22 @@ impl KeyboardHandler for State {
     fn release_key(
         &mut self,
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
         _: u32,
-        _: KeyEvent,
+        event: KeyEvent,
     ) {
+        if event.keysym == Keysym::space
+            && let Some(overlay) = &mut self.overlay
+        {
+            overlay.space(false, qh);
+        }
     }
 
     fn update_modifiers(
         &mut self,
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
         _: u32,
         modifiers: Modifiers,
@@ -527,6 +532,9 @@ impl KeyboardHandler for State {
     ) {
         if let Some(zoom) = &mut self.zoom {
             zoom.modifiers(modifiers);
+        }
+        if let Some(overlay) = &mut self.overlay {
+            overlay.modifiers(modifiers, qh);
         }
     }
 }
