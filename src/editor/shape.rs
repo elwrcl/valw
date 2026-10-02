@@ -154,7 +154,7 @@ pub enum Prim {
         width: f32,
         color: [u8; 4],
         closed: bool,
-        /// Round caps and joins; false means butt caps.
+        /// Round caps and joins; false means butt caps and miter joins.
         round: bool,
     },
     /// A convex polygon.
@@ -178,7 +178,14 @@ pub fn geometry(shape: &Shape) -> Vec<Prim> {
         Tool::Arrow => arrow(pts[0], pts[1], w, opaque),
         Tool::Rectangle => {
             let ((x0, y0), (x1, y1)) = (pts[0], pts[1]);
-            vec![stroke(vec![(x0, y0), (x1, y0), (x1, y1), (x0, y1)], true)]
+            // Sharp (miter) corners, as egui draws them while dragging.
+            vec![Prim::Stroke {
+                points: vec![(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+                width: w,
+                color: opaque,
+                closed: true,
+                round: false,
+            }]
         }
         Tool::Ellipse => {
             let ((x0, y0), (x1, y1)) = (pts[0], pts[1]);

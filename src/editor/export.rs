@@ -110,6 +110,19 @@ mod tests {
     }
 
     #[test]
+    fn rectangles_have_sharp_corners() {
+        let base = RgbaImage::from_pixel(60, 40, Rgba([255, 255, 255, 255]));
+        let rect = Shape {
+            tool: Tool::Rectangle,
+            style: Style { color: [255, 0, 0], width: 8.0 },
+            points: vec![(10.0, 10.0), (50.0, 30.0)],
+        };
+        let out = render(&base, &[rect]);
+        // A round join would leave the outer corner (6..7, 6..7) white.
+        assert_eq!(out.get_pixel(6, 6).0, [255, 0, 0, 255]);
+    }
+
+    #[test]
     fn highlighter_blends_at_40_percent() {
         let base = RgbaImage::from_pixel(100, 40, Rgba([0, 0, 255, 255]));
         let out = render(&base, &[line(Tool::Highlighter, [255, 255, 0])]);
