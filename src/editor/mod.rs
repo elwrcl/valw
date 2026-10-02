@@ -3,8 +3,6 @@
 pub mod doc;
 pub mod export;
 pub mod shape;
-// Used from Task 2 of the 5b plan on; that task removes this.
-#[allow(dead_code)]
 pub mod text;
 pub mod view;
 

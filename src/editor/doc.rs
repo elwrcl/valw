@@ -80,6 +80,7 @@ mod tests {
                 width: 2.0,
             },
             points: vec![(0.0, 0.0), (x, 0.0)],
+            text: String::new(),
         }
     }
 

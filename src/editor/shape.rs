@@ -11,16 +11,24 @@ pub enum Tool {
     Line,
     Pen,
     Highlighter,
+    Text,
+    Pixelate,
+    Number,
+    Crop,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 6] = [
+    pub const ALL: [Tool; 10] = [
         Tool::Arrow,
         Tool::Rectangle,
         Tool::Ellipse,
         Tool::Line,
         Tool::Pen,
         Tool::Highlighter,
+        Tool::Text,
+        Tool::Pixelate,
+        Tool::Number,
+        Tool::Crop,
     ];
 
     pub fn label(self) -> &'static str {
@@ -31,6 +39,10 @@ impl Tool {
             Tool::Line => "Line",
             Tool::Pen => "Pen",
             Tool::Highlighter => "Highlighter",
+            Tool::Text => "Text",
+            Tool::Pixelate => "Pixelate",
+            Tool::Number => "Number",
+            Tool::Crop => "Crop",
         }
     }
 
@@ -53,6 +65,23 @@ pub const PALETTE: [[u8; 3]; 7] = [
 /// S, M, L in image pixels; M is the default.
 pub const WIDTHS: [(&str, f32); 3] = [("S", 2.0), ("M", 4.0), ("L", 8.0)];
 
+/// 0, 1, 2 for S, M, L.
+pub fn size_index(width: f32) -> usize {
+    WIDTHS.iter().position(|w| w.1 == width).unwrap_or(1)
+}
+
+pub fn text_size(width: f32) -> f32 {
+    [16.0, 24.0, 36.0][size_index(width)]
+}
+
+pub fn block_size(width: f32) -> u32 {
+    [8, 12, 20][size_index(width)]
+}
+
+pub fn number_diameter(width: f32) -> f32 {
+    [24.0, 32.0, 44.0][size_index(width)]
+}
+
 const HIGHLIGHT_ALPHA: u8 = 102;
 const CLICK: f32 = 2.0;
 const ELLIPSE_POINTS: usize = 72;
@@ -64,18 +93,20 @@ pub struct Style {
 }
 
 /// One finished mark. Two-point tools hold [start, end]; Pen and
-/// Highlighter hold every point.
+/// Highlighter hold every point; Text holds its top-left and Number its
+/// centre, with the text or the number in `text`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Shape {
     pub tool: Tool,
     pub style: Style,
     pub points: Vec<P>,
+    pub text: String,
 }
 
 impl Shape {
     /// A press without a real drag. A Pen click still leaves a dot.
     pub fn is_click(&self) -> bool {
-        if self.tool == Tool::Pen {
+        if matches!(self.tool, Tool::Pen | Tool::Text | Tool::Number) {
             return false;
         }
         let first = self.points[0];
@@ -120,6 +151,7 @@ impl Drag {
             tool: self.tool,
             style: self.style,
             points,
+            text: String::new(),
         }
     }
 }
@@ -138,11 +170,11 @@ pub fn constrain(tool: Tool, start: P, end: P, shift: bool) -> P {
             let len = dx.hypot(dy);
             (start.0 + len * angle.cos(), start.1 + len * angle.sin())
         }
-        Tool::Rectangle | Tool::Ellipse => {
+        Tool::Rectangle | Tool::Ellipse | Tool::Pixelate => {
             let side = dx.abs().max(dy.abs());
             (start.0 + side.copysign(dx), start.1 + side.copysign(dy))
         }
-        Tool::Pen | Tool::Highlighter => end,
+        Tool::Pen | Tool::Highlighter | Tool::Text | Tool::Number | Tool::Crop => end,
     }
 }
 
@@ -205,6 +237,19 @@ pub fn geometry(shape: &Shape) -> Vec<Prim> {
             }]
         }
         Tool::Pen => vec![stroke(pts.clone(), false)],
+        // Drawn by the export renderer only.
+        Tool::Text | Tool::Number | Tool::Crop => Vec::new(),
+        // While dragging: the area that will be pixelated.
+        Tool::Pixelate => {
+            let ((x0, y0), (x1, y1)) = (pts[0], pts[1]);
+            vec![Prim::Stroke {
+                points: vec![(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+                width: 2.0,
+                color: [255, 255, 255, 200],
+                closed: true,
+                round: false,
+            }]
+        }
         Tool::Highlighter => vec![Prim::Stroke {
             points: pts.clone(),
             width: w * 4.0,
@@ -266,6 +311,7 @@ mod tests {
             tool,
             style: RED,
             points: points.to_vec(),
+            text: String::new(),
         }
     }
 
@@ -398,5 +444,51 @@ mod tests {
         d.move_to((30.0, 10.0));
         assert_eq!(d.shape(false).points, vec![(0.0, 0.0), (30.0, 10.0)]);
         assert_eq!(d.shape(true).points, vec![(0.0, 0.0), (30.0, 30.0)]);
+    }
+
+    #[test]
+    fn sizes_follow_s_m_l() {
+        let at = |w: f32| Style {
+            color: [0, 0, 0],
+            width: w,
+        };
+        assert_eq!(
+            [2.0, 4.0, 8.0].map(|w| text_size(at(w).width)),
+            [16.0, 24.0, 36.0]
+        );
+        assert_eq!(
+            [2.0, 4.0, 8.0].map(|w| block_size(at(w).width)),
+            [8, 12, 20]
+        );
+        assert_eq!(
+            [2.0, 4.0, 8.0].map(|w| number_diameter(at(w).width)),
+            [24.0, 32.0, 44.0]
+        );
+    }
+
+    #[test]
+    fn pixelate_drags_like_a_rectangle() {
+        let mut d = Drag::new(Tool::Pixelate, RED, (0.0, 0.0));
+        d.move_to((30.0, 10.0));
+        assert_eq!(d.shape(true).points, vec![(0.0, 0.0), (30.0, 30.0)]);
+        let g = geometry(&d.shape(false));
+        let Prim::Stroke { color, closed, .. } = &g[0] else {
+            panic!("{g:?}")
+        };
+        assert!(*closed && *color == [255, 255, 255, 200]);
+    }
+
+    #[test]
+    fn text_and_numbers_are_never_clicks_and_have_no_egui_geometry() {
+        for tool in [Tool::Text, Tool::Number] {
+            let s = Shape {
+                tool,
+                style: RED,
+                points: vec![(5.0, 5.0)],
+                text: "1".into(),
+            };
+            assert!(!s.is_click());
+            assert!(geometry(&s).is_empty());
+        }
     }
 }
