@@ -14,6 +14,8 @@
             !(builtins.elem (baseNameOf path) [
               ".direnv"
               ".jj"
+              # Plan ledgers and review notes; not part of the build.
+              ".superpowers"
               "result"
               "target"
             ]);
