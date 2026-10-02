@@ -65,7 +65,8 @@ mod tests {
         rustix::io::read(&report_r, &mut is_null).unwrap();
         assert_eq!(is_null, [1], "child stdout should be /dev/null");
 
-        // Closing our end lets the child exit.
-        drop(go_w);
+        // Let the child exit. Closing our end isn't enough: the child holds
+        // its own copy of `go_w` from the fork.
+        rustix::io::write(&go_w, &[1]).unwrap();
     }
 }
