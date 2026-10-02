@@ -114,7 +114,10 @@ mod tests {
         let base = RgbaImage::from_pixel(60, 40, Rgba([255, 255, 255, 255]));
         let rect = Shape {
             tool: Tool::Rectangle,
-            style: Style { color: [255, 0, 0], width: 8.0 },
+            style: Style {
+                color: [255, 0, 0],
+                width: 8.0,
+            },
             points: vec![(10.0, 10.0), (50.0, 30.0)],
         };
         let out = render(&base, &[rect]);

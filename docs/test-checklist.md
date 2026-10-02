@@ -74,7 +74,6 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - A panic during zoom frees the Wayland display before EGL is torn down (segfault instead of the panic message).
 - `zoom.scroll_step = nan` passes validation.
 - With Caps Lock on, `c`, `f` and `q` are ignored.
-- The libglvnd `LD_LIBRARY_PATH` reaches Satty and the clipboard child; the dev shell has no libglvnd (zoom/doctor warn under `cargo run`).
 - `valw doctor` shows only the EGL vendor; a software (llvmpipe) fallback would look fine. Report GL_RENDERER.
 
 ## Editor (Phase 5a)
@@ -88,3 +87,14 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - [ ] Ctrl+C then Esc: the edited image is still pasteable afterwards.
 - [ ] Esc with unsaved changes shows the bar; Esc again discards; Ctrl+S in the bar saves and closes. Closing the window with Mod+Q behaves the same.
 - [ ] A large (1920×1080) shot fits the window; a small one isn't blown up; the window can be resized.
+
+### Known minors (deferred from the editor review)
+
+- Esc during a drag commits the half-drawn shape.
+- A Pen click always stores two equal points; a touchpad tap in one frame draws nothing; Pen points aren't de-duplicated.
+- Any mouse button draws; it should be the primary one.
+- "Copied" shows even if the clipboard child fails; finished clipboard children aren't reaped until the editor exits.
+- After undoing back to the saved state, Ctrl+S still closes; the unsaved bar can come back without a new Esc.
+- The close guard runs only while the window is shown (App::ui, not App::logic).
+- Saving round-trips pixels through premultiplied alpha (tiny RGB changes on nearly transparent pixels).
+- The dev shell's LD_LIBRARY_PATH applies to every tool; Cargo.lock has duplicate smithay-client-toolkit/calloop/glow versions.
