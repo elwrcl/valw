@@ -1,8 +1,12 @@
+// The editor lands in pieces; Task 4 removes this.
+#![allow(dead_code)]
+
 mod capture;
 mod config;
 mod detach;
 mod dnd;
 mod doctor;
+mod editor;
 mod error;
 mod frame;
 mod host;
