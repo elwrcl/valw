@@ -13,6 +13,8 @@
           nativeBuildInputs = old.nativeBuildInputs ++ tools;
           buildPhase = cmd;
           installPhase = "touch $out";
+          # The package patches its binary's RUNPATH; a check has no binary.
+          postFixup = "";
         });
     in
     {
