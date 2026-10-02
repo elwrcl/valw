@@ -8,6 +8,7 @@ pub struct Doc {
     shapes: Vec<Shape>,
     redo: Vec<Shape>,
     saved: Vec<Shape>,
+    revision: u64,
 }
 
 impl Doc {
@@ -22,6 +23,7 @@ impl Doc {
     pub fn add(&mut self, shape: Shape) {
         self.shapes.push(shape);
         self.redo.clear();
+        self.revision += 1;
     }
 
     pub fn undo(&mut self) -> bool {
@@ -29,6 +31,7 @@ impl Doc {
             return false;
         };
         self.redo.push(shape);
+        self.revision += 1;
         true
     }
 
@@ -37,7 +40,13 @@ impl Doc {
             return false;
         };
         self.shapes.push(shape);
+        self.revision += 1;
         true
+    }
+
+    /// Changes whenever the drawn shapes do.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn can_undo(&self) -> bool {
@@ -85,6 +94,24 @@ mod tests {
         assert!(d.redo());
         assert_eq!(d.shapes(), &[line(1.0), line(2.0)]);
         assert!(!d.redo());
+    }
+
+    #[test]
+    fn revision_follows_the_shapes() {
+        let mut d = Doc::new();
+        let r0 = d.revision();
+        d.add(line(1.0));
+        let r1 = d.revision();
+        assert_ne!(r1, r0);
+        d.mark_saved();
+        assert_eq!(d.revision(), r1, "saving doesn't change what is drawn");
+        d.undo();
+        assert_ne!(d.revision(), r1);
+        let r2 = d.revision();
+        assert!(!d.undo(), "nothing left");
+        assert_eq!(d.revision(), r2);
+        d.redo();
+        assert_ne!(d.revision(), r2);
     }
 
     #[test]

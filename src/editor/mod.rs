@@ -52,7 +52,11 @@ pub fn run(path: &Path) -> Result<()> {
 struct Editor {
     path: PathBuf,
     base: RgbaImage,
+    /// The base with every finished shape, drawn by the export renderer so
+    /// the canvas shows the saved pixels.
     texture: egui::TextureHandle,
+    /// The `Doc::revision` the texture shows.
+    shown: u64,
     doc: Doc,
     tool: Tool,
     color: usize,
@@ -74,6 +78,7 @@ impl Editor {
             path,
             base,
             texture,
+            shown: 0,
             doc: Doc::new(),
             tool: Tool::Arrow,
             color: 0,
@@ -299,6 +304,14 @@ impl Editor {
             Color32::WHITE,
         );
 
+        if self.doc.revision() != self.shown {
+            let composite = export::render(&self.base, self.doc.shapes());
+            let size = [composite.width() as usize, composite.height() as usize];
+            let pixels = egui::ColorImage::from_rgba_unmultiplied(size, composite.as_raw());
+            self.texture.set(pixels, egui::TextureOptions::LINEAR);
+            self.shown = self.doc.revision();
+        }
+
         let shift = ui.input(|i| i.modifiers.shift);
         let pointer = response
             .interact_pointer_pos()
@@ -321,9 +334,10 @@ impl Editor {
             }
         }
 
-        let live = self.drag.as_ref().map(|d| d.shape(shift));
-        for shape in self.doc.shapes().iter().chain(live.as_ref()) {
-            for prim in geometry(shape) {
+        // Finished shapes are in the texture; only the one being drawn is
+        // painted here.
+        if let Some(live) = self.drag.as_ref().map(|d| d.shape(shift)) {
+            for prim in geometry(&live) {
                 paint(&painter, &prim, fit.scale, to_pos);
             }
         }
