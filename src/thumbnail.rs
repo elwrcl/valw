@@ -16,12 +16,16 @@ use smithay_client_toolkit::{
         slot::{Buffer, SlotPool},
     },
 };
-use wayland_client::{QueueHandle, protocol::wl_shm};
+use wayland_client::{
+    Proxy, QueueHandle,
+    protocol::{wl_shm, wl_surface::WlSurface},
+};
 use wayland_protocols::wp::viewporter::client::{
     wp_viewport::WpViewport, wp_viewporter::WpViewporter,
 };
 
-use crate::stack::{self, Anim, EDGE_MARGIN, Release};
+use crate::dnd::{self, AfterDrag, Outcome};
+use crate::stack::{self, Anim, EDGE_MARGIN, Gesture, Release};
 use crate::wayland::{Output, State};
 
 pub const NAMESPACE: &str = "valw-preview";
@@ -93,6 +97,24 @@ pub enum Action {
     OpenEditor,
 }
 
+/// A press turned into a drag-out: the host starts the drag with these.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DragStart {
+    /// Serial of the press; the compositor only accepts a drag for it.
+    pub serial: u32,
+    /// Where on the image the press was, so it stays under the pointer.
+    pub grab: (f64, f64),
+}
+
+/// A press in progress and what it turned into once the pointer moved.
+#[derive(Debug, Clone, Copy)]
+struct Press {
+    x: f64,
+    y: f64,
+    serial: u32,
+    gesture: Option<Gesture>,
+}
+
 pub struct Thumbnail {
     pub id: u64,
     pub output: String,
@@ -108,13 +130,17 @@ pub struct Thumbnail {
     /// How far right of its resting place the image is drawn, logical px.
     offset: f64,
     anim: Option<(Anim, Instant)>,
-    drag: Option<(f64, f64)>,
+    press: Option<Press>,
     margin: u32,
     /// Input region while visible (the image) and while hidden (nothing).
     input: Region,
     no_input: Region,
     /// Hidden for a capture: drawn fully transparent, clicks pass through.
     hidden: bool,
+    /// Being dragged out: the drag icon shows it, so this one hides too.
+    /// Separate from `hidden` so a capture ending mid-drag can't bring it back.
+    dragging: bool,
+    icon_buffer: Option<Buffer>,
     configured: bool,
     frame_pending: bool,
     started: bool,
@@ -178,11 +204,13 @@ impl Thumbnail {
             scale: output.scale,
             offset: travel(size.0),
             anim: None,
-            drag: None,
+            press: None,
             margin: EDGE_MARGIN,
             input,
             no_input,
             hidden: false,
+            dragging: false,
+            icon_buffer: None,
             configured: false,
             frame_pending: false,
             started: false,
@@ -191,8 +219,12 @@ impl Thumbnail {
         })
     }
 
-    pub fn is(&self, surface: &wayland_client::protocol::wl_surface::WlSurface) -> bool {
+    pub fn is(&self, surface: &WlSurface) -> bool {
         self.layer.wl_surface() == surface
+    }
+
+    pub fn surface(&self) -> &WlSurface {
+        self.layer.wl_surface()
     }
 
     pub fn is_layer(&self, layer: &LayerSurface) -> bool {
@@ -205,7 +237,23 @@ impl Thumbnail {
 
     /// The slide-out has finished (or is invisible anyway).
     pub fn is_finished(&self) -> bool {
-        self.closing && (self.hidden || anim_over(self.anim, Instant::now()))
+        self.closing && (!self.visible() || anim_over(self.anim, Instant::now()))
+    }
+
+    fn visible(&self) -> bool {
+        !self.hidden && !self.dragging
+    }
+
+    /// Clicks reach the image only while it is visible.
+    fn apply_input(&self) {
+        let region = if self.visible() {
+            &self.input
+        } else {
+            &self.no_input
+        };
+        self.layer
+            .wl_surface()
+            .set_input_region(Some(region.wl_region()));
     }
 
     /// Makes the thumbnail invisible and click-through. The surface stays
@@ -215,9 +263,7 @@ impl Thumbnail {
             return;
         }
         self.hidden = true;
-        self.layer
-            .wl_surface()
-            .set_input_region(Some(self.no_input.wl_region()));
+        self.apply_input();
         self.draw(qh, true);
     }
 
@@ -226,9 +272,7 @@ impl Thumbnail {
             return;
         }
         self.hidden = false;
-        self.layer
-            .wl_surface()
-            .set_input_region(Some(self.input.wl_region()));
+        self.apply_input();
         self.draw(qh, true);
     }
 
@@ -252,15 +296,16 @@ impl Thumbnail {
 
     pub fn frame_done(&mut self, qh: &QueueHandle<State>) {
         self.frame_pending = false;
-        if self.anim.is_some() || self.drag.is_some() {
+        if self.anim.is_some() || self.press.is_some() {
             self.draw(qh, false);
         }
     }
 
-    /// The timeout fired: slide out, unless the user is dragging it.
+    /// The timeout fired: slide out, unless the user is holding or
+    /// dragging it; then it is decided when they let go.
     pub fn expire(&mut self, qh: &QueueHandle<State>) {
         self.expired = true;
-        if self.drag.is_none() {
+        if self.press.is_none() && !self.dragging {
             self.slide_out(qh);
         }
     }
@@ -277,23 +322,46 @@ impl Thumbnail {
         self.draw(qh, false);
     }
 
-    pub fn press(&mut self, x: f64, y: f64) {
-        if !self.closing {
+    pub fn press(&mut self, x: f64, y: f64, serial: u32) {
+        if !self.closing && !self.dragging {
             self.anim = None;
-            self.drag = Some((x, y));
+            self.press = Some(Press {
+                x,
+                y,
+                serial,
+                gesture: None,
+            });
         }
     }
 
-    pub fn motion(&mut self, x: f64, qh: &QueueHandle<State>) {
-        if let Some((x0, _)) = self.drag {
-            self.offset = stack::drag_offset(x - x0);
+    /// Follows a swipe, or returns a `DragStart` the moment the press turns
+    /// into a drag-out.
+    pub fn motion(&mut self, x: f64, y: f64, qh: &QueueHandle<State>) -> Option<DragStart> {
+        let press = self.press.as_mut()?;
+        let (dx, dy) = (x - press.x, y - press.y);
+        if press.gesture.is_none() {
+            press.gesture = stack::classify(dx, dy);
+            if press.gesture == Some(Gesture::DragOut) {
+                return Some(DragStart {
+                    serial: press.serial,
+                    grab: (press.x, press.y),
+                });
+            }
+        }
+        if press.gesture == Some(Gesture::Swipe) {
+            self.offset = stack::drag_offset(dx);
             self.draw(qh, false);
         }
+        None
     }
 
     pub fn release(&mut self, x: f64, y: f64, qh: &QueueHandle<State>) -> Option<Action> {
-        let (x0, y0) = self.drag.take()?;
-        match stack::release(x - x0, y - y0, self.size.0 as f64) {
+        let press = self.press.take()?;
+        if press.gesture == Some(Gesture::DragOut) {
+            // The drag never started (no data device); nothing moved.
+            return None;
+        }
+        match stack::release(x - press.x, y - press.y, self.size.0 as f64) {
             Release::Click => {
                 self.slide_out(qh);
                 Some(Action::OpenEditor)
@@ -314,6 +382,63 @@ impl Thumbnail {
         }
     }
 
+    /// The drag started: the icon carries the image, this one hides.
+    pub fn begin_drag(&mut self, qh: &QueueHandle<State>) {
+        self.press = None;
+        self.dragging = true;
+        self.anim = None;
+        self.offset = 0.0;
+        self.apply_input();
+        self.draw(qh, true);
+    }
+
+    pub fn end_drag(&mut self, outcome: Outcome, qh: &QueueHandle<State>) {
+        self.dragging = false;
+        self.icon_buffer = None;
+        self.apply_input();
+        match dnd::after_drag(outcome, self.expired) {
+            AfterDrag::Close => {
+                // Already invisible; nothing to animate.
+                self.closing = true;
+                self.anim = None;
+            }
+            AfterDrag::ComeBack => {
+                self.anim = Some((Anim::slide_in(travel(self.size.0)), Instant::now()));
+                self.draw(qh, true);
+            }
+            AfterDrag::SlideOut => self.slide_out(qh),
+        }
+    }
+
+    /// Draws the drag icon: the image alone, sharp at the output's scale,
+    /// placed so the grabbed point stays under the pointer.
+    pub fn draw_icon(&mut self, icon: &WlSurface, viewport: &WpViewport, grab: (f64, f64)) {
+        let (width, height) = self.small.dimensions();
+        let Ok((buffer, canvas)) = self.pool.create_buffer(
+            width as i32,
+            height as i32,
+            width as i32 * 4,
+            wl_shm::Format::Argb8888,
+        ) else {
+            tracing::warn!("could not allocate a drag icon buffer");
+            return;
+        };
+        paint(canvas, width, &self.small, 0);
+        viewport.set_destination(self.size.0 as i32, self.size.1 as i32);
+        // wl_surface.offset needs version 5; older compositors put the
+        // icon's corner at the pointer instead.
+        if icon.version() >= 5 {
+            icon.offset(-(grab.0.round() as i32), -(grab.1.round() as i32));
+        }
+        icon.damage_buffer(0, 0, width as i32, height as i32);
+        if buffer.attach_to(icon).is_err() {
+            tracing::warn!("could not attach the drag icon");
+            return;
+        }
+        icon.commit();
+        self.icon_buffer = Some(buffer);
+    }
+
     fn draw(&mut self, qh: &QueueHandle<State>, force: bool) {
         if let Some((anim, start)) = self.anim {
             let (offset, done) = anim.at(start.elapsed().as_secs_f64() * 1000.0);
@@ -328,6 +453,7 @@ impl Thumbnail {
         }
         let width = canvas_width(self.size.0, self.scale);
         let height = self.small.height();
+        let visible = self.visible();
         let Ok((buffer, canvas)) = self.pool.create_buffer(
             width as i32,
             height as i32,
@@ -337,7 +463,7 @@ impl Thumbnail {
             tracing::warn!("could not allocate a thumbnail buffer");
             return;
         };
-        if self.hidden {
+        if !visible {
             canvas.fill(0);
         } else {
             paint(
@@ -351,7 +477,7 @@ impl Thumbnail {
         surface.damage_buffer(0, 0, width as i32, height as i32);
         // Keep drawing while something moves; motion that arrives while a
         // frame is pending is picked up by the next frame callback.
-        if self.anim.is_some() || self.drag.is_some() {
+        if self.anim.is_some() || self.press.is_some() {
             surface.frame(qh, FrameCallbackData(surface.clone()));
             self.frame_pending = true;
         }

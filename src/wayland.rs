@@ -4,6 +4,12 @@ use anyhow::{Context, Result, bail};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
+    data_device_manager::{
+        DataDeviceManagerState, WritePipe,
+        data_device::{DataDevice, DataDeviceHandler},
+        data_offer::{DataOfferHandler, DragOffer},
+        data_source::DataSourceHandler,
+    },
     delegate_registry,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
@@ -19,7 +25,10 @@ use smithay_client_toolkit::{
 use wayland_client::{
     Connection, EventQueue, QueueHandle,
     globals::{GlobalList, registry_queue_init},
-    protocol::{wl_buffer::WlBuffer, wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface},
+    protocol::{
+        wl_buffer::WlBuffer, wl_data_device::WlDataDevice, wl_data_device_manager::DndAction,
+        wl_data_source::WlDataSource, wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface,
+    },
 };
 use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::WpCursorShapeDeviceV1;
 use wayland_protocols::wp::viewporter::client::{
@@ -28,6 +37,7 @@ use wayland_protocols::wp::viewporter::client::{
 use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
 
 use crate::capture::Pending;
+use crate::dnd::Outcome;
 use crate::error::HintExt;
 use crate::frame::OutputGeom;
 use crate::host::Host;
@@ -61,6 +71,9 @@ pub struct State {
     pub viewporter: Option<WpViewporter>,
     pub cursor_shape: Option<CursorShapeManager>,
     pub cursor_device: Option<WpCursorShapeDeviceV1>,
+    /// For dragging a preview out; the host never receives drops.
+    pub data_devices: Option<DataDeviceManagerState>,
+    pub data_device: Option<DataDevice>,
     pub keyboard: Option<wl_keyboard::WlKeyboard>,
     pub pointer: Option<wl_pointer::WlPointer>,
     /// Screencopy requests in flight.
@@ -92,6 +105,8 @@ impl Wayland {
             viewporter: globals.bind(&qh, 1..=1, ()).ok(),
             cursor_shape: CursorShapeManager::bind(&globals, &qh).ok(),
             cursor_device: None,
+            data_devices: DataDeviceManagerState::bind(&globals, &qh).ok(),
+            data_device: None,
             keyboard: None,
             pointer: None,
             captures: Vec::new(),
@@ -370,6 +385,10 @@ impl SeatHandler for State {
                 .cursor_shape
                 .as_ref()
                 .map(|m| m.get_shape_device(&pointer, qh));
+            self.data_device = self
+                .data_devices
+                .as_ref()
+                .map(|m| m.get_data_device(qh, &seat));
             self.pointer = Some(pointer);
         }
     }
@@ -481,9 +500,91 @@ impl PointerHandler for State {
         if let Some(overlay) = &mut self.overlay {
             overlay.pointer(events, self.cursor_device.as_ref(), qh);
         }
-        if let Some(preview) = &mut self.preview {
-            preview.pointer(events, self.cursor_device.as_ref(), qh);
+        if self.preview.is_some() {
+            crate::host::pointer(self, events, qh);
         }
+    }
+}
+
+impl DataSourceHandler for State {
+    fn accept_mime(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlDataSource,
+        _: Option<String>,
+    ) {
+    }
+
+    fn send_request(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        source: &WlDataSource,
+        mime: String,
+        fd: WritePipe,
+    ) {
+        if let Some(preview) = &self.preview {
+            preview.send(source, mime, fd);
+        }
+    }
+
+    fn cancelled(&mut self, _: &Connection, qh: &QueueHandle<Self>, source: &WlDataSource) {
+        if let Some(preview) = &mut self.preview {
+            preview.drag_ended(source, Outcome::Cancelled, qh);
+        }
+    }
+
+    fn dnd_dropped(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource) {}
+
+    fn dnd_finished(&mut self, _: &Connection, qh: &QueueHandle<Self>, source: &WlDataSource) {
+        if let Some(preview) = &mut self.preview {
+            preview.drag_ended(source, Outcome::Dropped, qh);
+        }
+    }
+
+    fn action(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataSource, _: DndAction) {}
+}
+
+// valw only ever starts drags; incoming offers are ignored.
+impl DataDeviceHandler for State {
+    fn enter(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &WlDataDevice,
+        _: f64,
+        _: f64,
+        _: &wl_surface::WlSurface,
+    ) {
+    }
+
+    fn leave(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
+
+    fn motion(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice, _: f64, _: f64) {}
+
+    fn selection(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
+
+    fn drop_performed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &WlDataDevice) {}
+}
+
+impl DataOfferHandler for State {
+    fn source_actions(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &mut DragOffer,
+        _: DndAction,
+    ) {
+    }
+
+    fn selected_action(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &mut DragOffer,
+        _: DndAction,
+    ) {
     }
 }
 

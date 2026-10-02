@@ -5,9 +5,12 @@ use std::collections::BTreeSet;
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use smithay_client_toolkit::data_device_manager::{WritePipe, data_source::DragSource};
 use smithay_client_toolkit::reexports::calloop::{
     EventLoop, Interest, LoopHandle, Mode, PostAction,
     generic::Generic,
@@ -16,15 +19,16 @@ use smithay_client_toolkit::reexports::calloop::{
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 use smithay_client_toolkit::seat::pointer::{BTN_LEFT, PointerEvent, PointerEventKind};
 use smithay_client_toolkit::shell::wlr_layer::LayerSurface;
+use wayland_client::protocol::{wl_data_device_manager::DndAction, wl_data_source::WlDataSource};
 use wayland_client::{Connection, QueueHandle, protocol::wl_surface::WlSurface};
-use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::{
-    Shape, WpCursorShapeDeviceV1,
-};
+use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::Shape;
+use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 
+use crate::dnd::{self, Outcome};
 use crate::ipc::{self, Reply, Request};
 use crate::lock::Lock;
 use crate::stack;
-use crate::thumbnail::{Action, Parts, Thumbnail};
+use crate::thumbnail::{Action, DragStart, Parts, Thumbnail};
 use crate::wayland::{State, Wayland};
 
 /// A host nobody connects to within this time gives up.
@@ -89,6 +93,19 @@ pub struct Host {
     conn: Connection,
     handle: LoopHandle<'static, State>,
     qh: QueueHandle<State>,
+    drag: Option<Drag>,
+    /// Threads still writing dropped data; the host waits for them, or the
+    /// receiving app would get a cut-off file.
+    writers: Arc<AtomicUsize>,
+    warned_no_dnd: bool,
+}
+
+/// The drag-out in progress. Dropping the source cancels the drag.
+struct Drag {
+    thumb: u64,
+    source: DragSource,
+    icon: WlSurface,
+    icon_viewport: WpViewport,
 }
 
 /// Runs the host until its last thumbnail closes. A second host exits
@@ -128,6 +145,9 @@ pub fn run() -> Result<()> {
         conn,
         handle: handle.clone(),
         qh,
+        drag: None,
+        writers: Arc::new(AtomicUsize::new(0)),
+        warned_no_dnd: false,
     });
 
     let mut next_client = 0u64;
@@ -152,7 +172,8 @@ pub fn run() -> Result<()> {
         .run(Duration::from_millis(500), &mut state, |state| {
             let host = state.preview.as_mut().expect("host state");
             host.tidy();
-            if host.core.should_exit(host.thumbs.len(), Instant::now()) {
+            let busy = host.thumbs.len() + host.writers.load(Ordering::SeqCst);
+            if host.core.should_exit(busy, Instant::now()) {
                 signal.stop();
             }
         })
@@ -253,38 +274,40 @@ impl Host {
         self.thumbs.retain(|t| !t.is_layer(layer));
     }
 
-    pub fn pointer(
-        &mut self,
-        events: &[PointerEvent],
-        cursor: Option<&WpCursorShapeDeviceV1>,
-        qh: &QueueHandle<State>,
-    ) {
-        for event in events {
-            let Some(t) = self.thumb(&event.surface) else {
-                continue;
-            };
-            let (x, y) = event.position;
-            match event.kind {
-                PointerEventKind::Enter { serial } => {
-                    if let Some(cursor) = cursor {
-                        cursor.set_shape(serial, Shape::Pointer);
-                    }
-                }
-                PointerEventKind::Press {
-                    button: BTN_LEFT, ..
-                } => t.press(x, y),
-                PointerEventKind::Motion { .. } => t.motion(x, qh),
-                PointerEventKind::Release {
-                    button: BTN_LEFT, ..
-                } => {
-                    let action = t.release(x, y, qh);
-                    if action == Some(Action::OpenEditor) {
-                        open_editor(&t.path);
-                    }
-                }
-                _ => {}
+    /// Writes the dragged screenshot for the receiving app, on its own
+    /// thread: a large PNG fills the pipe, and blocking here would freeze
+    /// every thumbnail.
+    pub fn send(&self, source: &WlDataSource, mime: String, fd: WritePipe) {
+        let Some(drag) = self.drag.as_ref().filter(|d| d.source.inner() == source) else {
+            return;
+        };
+        let Some(thumb) = self.thumbs.iter().find(|t| t.id == drag.thumb) else {
+            return;
+        };
+        let path = thumb.path.clone();
+        let writers = Arc::clone(&self.writers);
+        writers.fetch_add(1, Ordering::SeqCst);
+        std::thread::spawn(move || {
+            let mut fd = fd;
+            if let Err(e) = dnd::write_offer(&mime, &path, &mut fd) {
+                tracing::warn!("could not send the screenshot as {mime}: {e:#}");
             }
+            drop(fd);
+            writers.fetch_sub(1, Ordering::SeqCst);
+        });
+    }
+
+    pub fn drag_ended(&mut self, source: &WlDataSource, outcome: Outcome, qh: &QueueHandle<State>) {
+        let Some(drag) = self.drag.take_if(|d| d.source.inner() == source) else {
+            return;
+        };
+        tracing::info!("drag-out {outcome:?}");
+        drag.icon_viewport.destroy();
+        drag.icon.destroy();
+        if let Some(t) = self.thumbs.iter_mut().find(|t| t.id == drag.thumb) {
+            t.end_drag(outcome, qh);
         }
+        let _ = self.conn.flush();
     }
 
     fn expire(&mut self, id: u64) {
@@ -304,6 +327,78 @@ impl Host {
             }
         }
     }
+}
+
+/// Pointer events on thumbnails. A free function: starting a drag needs
+/// more of `State` than the host.
+pub fn pointer(state: &mut State, events: &[PointerEvent], qh: &QueueHandle<State>) {
+    for event in events {
+        let Some(host) = state.preview.as_mut() else {
+            return;
+        };
+        let Some(i) = host.thumbs.iter().position(|t| t.is(&event.surface)) else {
+            continue;
+        };
+        let (x, y) = event.position;
+        match event.kind {
+            PointerEventKind::Enter { serial } => {
+                if let Some(cursor) = &state.cursor_device {
+                    cursor.set_shape(serial, Shape::Pointer);
+                }
+            }
+            PointerEventKind::Press {
+                button: BTN_LEFT,
+                serial,
+                ..
+            } => host.thumbs[i].press(x, y, serial),
+            PointerEventKind::Motion { .. } => {
+                let start = host.thumbs[i].motion(x, y, qh);
+                if let Some(start) = start {
+                    start_drag(state, i, start, qh);
+                }
+            }
+            PointerEventKind::Release {
+                button: BTN_LEFT, ..
+            } => {
+                let t = &mut host.thumbs[i];
+                if t.release(x, y, qh) == Some(Action::OpenEditor) {
+                    open_editor(&t.path);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn start_drag(state: &mut State, i: usize, start: DragStart, qh: &QueueHandle<State>) {
+    let host = state.preview.as_mut().expect("host state");
+    let (Some(manager), Some(device), Some(viewporter)) =
+        (&state.data_devices, &state.data_device, &state.viewporter)
+    else {
+        if !host.warned_no_dnd {
+            host.warned_no_dnd = true;
+            tracing::warn!("the compositor has no wl_data_device_manager; drag-out is off");
+        }
+        return;
+    };
+    if host.drag.is_some() {
+        return;
+    }
+    let source = manager.create_drag_and_drop_source(qh, dnd::MIME_TYPES, DndAction::Copy);
+    let icon = state.compositor.create_surface(qh);
+    let icon_viewport = viewporter.get_viewport(&icon, qh, ());
+    let thumb = &mut host.thumbs[i];
+    source.start_drag(device, thumb.surface(), Some(&icon), start.serial);
+    thumb.draw_icon(&icon, &icon_viewport, start.grab);
+    thumb.begin_drag(qh);
+    tracing::info!("drag-out started for {}", thumb.path.display());
+    host.drag = Some(Drag {
+        thumb: thumb.id,
+        source,
+        icon,
+        icon_viewport,
+    });
+    let _ = host.conn.flush();
 }
 
 fn disconnect(state: &mut State, id: u64) {
