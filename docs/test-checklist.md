@@ -98,3 +98,12 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - The close guard runs only while the window is shown (App::ui, not App::logic).
 - Saving round-trips pixels through premultiplied alpha (tiny RGB changes on nearly transparent pixels).
 - The dev shell's LD_LIBRARY_PATH applies to every tool; Cargo.lock has duplicate smithay-client-toolkit/calloop/glow versions.
+
+## Editor tools (Phase 5b)
+
+- [ ] T: click, type (Turkish: ğüşıöçİ), Shift+Enter for a new line, Enter finishes; a click elsewhere also finishes; Esc drops it; while typing, letters don't switch tools and Ctrl+Z/Esc don't undo or close.
+- [ ] Text is bold in the chosen colour with a dark outline, readable on light and dark backgrounds; S/M/L sizes; the saved PNG matches the canvas.
+- [ ] B: dragging pixelates the area (also earlier arrows inside it); S/M/L block sizes; edges of the image are fine.
+- [ ] N: clicks place 1, 2, 3 …; undo then a new click reuses the freed number.
+- [ ] C: drag a crop, adjust its edges and corners (the cursor changes), Enter applies, Esc cancels; the canvas then shows only the crop; drawing after a crop lands where you click; undo restores the full image; the saved PNG has the crop's size.
+- [ ] The toolbar shows all 10 tools and still wraps in a narrow window.
