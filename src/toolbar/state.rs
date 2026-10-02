@@ -24,6 +24,7 @@ pub struct ToolbarState {
     pub timer: u32,
     pub cursor: bool,
     pub preview: bool,
+    pub sound: bool,
 }
 
 /// The file, every key optional.
@@ -33,6 +34,7 @@ struct File {
     timer: Option<u32>,
     cursor: Option<bool>,
     preview: Option<bool>,
+    sound: Option<bool>,
 }
 
 pub const TIMERS: [u32; 3] = [0, 5, 10];
@@ -51,6 +53,7 @@ pub fn defaults(config: &Config) -> ToolbarState {
         timer: 0,
         cursor: config.capture.show_cursor,
         preview: config.preview.enabled,
+        sound: config.sound.enabled,
     }
 }
 
@@ -85,6 +88,7 @@ fn parse(text: &str, fallback: ToolbarState) -> Result<ToolbarState> {
         timer,
         cursor: file.cursor.unwrap_or(fallback.cursor),
         preview: file.preview.unwrap_or(fallback.preview),
+        sound: file.sound.unwrap_or(fallback.sound),
     })
 }
 
@@ -106,13 +110,15 @@ mod tests {
         let mut config = Config::default();
         config.capture.show_cursor = true;
         config.preview.enabled = false;
+        config.sound.enabled = false;
         assert_eq!(
             defaults(&config),
             ToolbarState {
                 mode: Mode::Region,
                 timer: 0,
                 cursor: true,
-                preview: false
+                preview: false,
+                sound: false,
             }
         );
     }
@@ -126,6 +132,7 @@ mod tests {
             timer: 10,
             cursor: true,
             preview: true,
+            sound: false,
         };
         save(&path, &state).unwrap();
         assert_eq!(load(&path, &Config::default()), state);

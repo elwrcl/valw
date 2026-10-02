@@ -16,8 +16,6 @@ mod region;
 mod render;
 mod selection;
 mod shadow;
-// The sound lands in two tasks; Task 5 of the polish plan removes this.
-#[allow(dead_code)]
 mod sound;
 mod stack;
 mod thumbnail;
@@ -86,6 +84,9 @@ enum Command {
     /// Internal: the process that shows preview thumbnails.
     #[command(name = "__preview-host", hide = true)]
     PreviewHost,
+    /// Internal: play the whole combo, for tuning the sounds by ear.
+    #[command(name = "__combo-demo", hide = true)]
+    ComboDemo,
     /// Internal: serve a PNG from stdin as the clipboard (the editor's copy).
     #[command(name = "__clipboard", hide = true)]
     Clipboard,
@@ -114,6 +115,8 @@ struct Common {
     toolbar_cursor: Option<bool>,
     #[arg(skip)]
     toolbar_preview: Option<bool>,
+    #[arg(skip)]
+    toolbar_sound: Option<bool>,
 }
 
 /// Whether the cursor goes into the shot.
@@ -121,6 +124,11 @@ fn wants_cursor(common: &Common, config: &Config) -> bool {
     common
         .toolbar_cursor
         .unwrap_or(common.cursor || config.capture.show_cursor)
+}
+
+/// Whether the shutter sound plays.
+fn wants_sound(common: &Common, config: &Config) -> bool {
+    common.toolbar_sound.unwrap_or(config.sound.enabled)
 }
 
 /// Whether the preview thumbnail is shown.
@@ -180,6 +188,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Window { common } => capture(Mode::Window, common),
         Command::Zoom { common } => capture(Mode::Zoom, common),
         Command::Edit { file } => editor::run(&file),
+        Command::ComboDemo => sound::demo(&config::load(&config::default_path())?.sound),
         Command::Toolbar => {
             let config = config::load(&config::default_path())?;
             let (mode, common) = from_toolbar(toolbar::run(&config)?);
@@ -202,6 +211,7 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
     }
     let cursor = wants_cursor(&common, &config);
     let preview = wants_preview(&common, &config);
+    let sound = wants_sound(&common, &config);
     let mut wl = Wayland::connect()?;
     if let Ok(version) = niri::version() {
         tracing::info!("niri {version}");
@@ -256,6 +266,7 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
             }
         }
     };
+    sound::play(&config.sound, sound);
     drop(wl);
 
     let target = Target::from_args(common.output, common.clipboard_only);
@@ -305,6 +316,7 @@ fn from_toolbar(pick: toolbar::Picked) -> (Mode, Common) {
         no_preview: false,
         toolbar_cursor: Some(pick.cursor),
         toolbar_preview: Some(pick.preview),
+        toolbar_sound: Some(pick.sound),
     };
     (mode, common)
 }
@@ -406,6 +418,7 @@ mod tests {
         assert!(!parses(&["edit"]));
         assert!(parses(&["__clipboard"]));
         assert!(parses(&["toolbar"]));
+        assert!(parses(&["__combo-demo"]));
     }
 
     #[test]
@@ -415,6 +428,7 @@ mod tests {
             mode,
             cursor,
             preview,
+            sound: true,
         };
         let (mode, common) = from_toolbar(pick(T::Screen, true, false));
         assert!(matches!(mode, Mode::Screen { all: false }));
@@ -453,9 +467,14 @@ mod tests {
                 mode: T::Screen,
                 cursor,
                 preview,
+                sound: preview,
             })
             .1
         };
+        on.sound.enabled = true;
+        off.sound.enabled = false;
+        assert!(!wants_sound(&pick(false, false), &on));
+        assert!(wants_sound(&pick(true, true), &off));
         assert!(
             !wants_cursor(&pick(false, false), &on),
             "unticked beats the config"
@@ -500,6 +519,7 @@ mod tests {
         let help = Cli::command().render_help().to_string();
         assert!(!help.contains("preview-host"), "{help}");
         assert!(!help.contains("__clipboard"), "{help}");
+        assert!(!help.contains("combo-demo"), "{help}");
     }
 
     #[test]

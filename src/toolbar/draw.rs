@@ -113,6 +113,7 @@ pub fn bar(
                 MenuItem::Timer(t) => state.timer == *t,
                 MenuItem::Cursor => state.cursor,
                 MenuItem::Preview => state.preview,
+                MenuItem::Sound => state.sound,
             };
             if on {
                 label(&mut p, *r, crate::toolbar::layout::BUTTON_PAD, "✓", scale);
@@ -162,6 +163,7 @@ mod tests {
         timer: 0,
         cursor: false,
         preview: true,
+        sound: true,
     };
 
     fn alpha(p: &Pixmap, x: f32, y: f32, scale: f32) -> u8 {

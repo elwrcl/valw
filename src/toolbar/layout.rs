@@ -32,6 +32,7 @@ pub enum MenuItem {
     Timer(u32),
     Cursor,
     Preview,
+    Sound,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,12 +62,13 @@ const BAR: [Option<(Target, &str)>; 7] = [
     Some((Target::Options, "Options ▾")),
 ];
 
-const MENU: [(MenuItem, &str); 5] = [
+const MENU: [(MenuItem, &str); 6] = [
     (MenuItem::Timer(0), "No timer"),
     (MenuItem::Timer(5), "5 second timer"),
     (MenuItem::Timer(10), "10 second timer"),
     (MenuItem::Cursor, "Show cursor"),
     (MenuItem::Preview, "Show preview"),
+    (MenuItem::Sound, "Play sound"),
 ];
 
 /// Lays the toolbar out on an output of `output` logical px; `measure`
@@ -240,7 +242,8 @@ mod tests {
                 MenuItem::Timer(5),
                 MenuItem::Timer(10),
                 MenuItem::Cursor,
-                MenuItem::Preview
+                MenuItem::Preview,
+                MenuItem::Sound
             ]
         );
         let cursor = centre(l.rows[3].1);

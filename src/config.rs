@@ -13,6 +13,7 @@ pub struct Config {
     pub preview: Preview,
     pub zoom: Zoom,
     pub editor: Editor,
+    pub sound: Sound,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -67,6 +68,26 @@ pub enum Backend {
     #[default]
     Builtin,
     Satty,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct Sound {
+    pub enabled: bool,
+    /// 0.0–1.0.
+    pub volume: f32,
+    /// A pause this long starts the combo over.
+    pub combo_reset_secs: u64,
+}
+
+impl Default for Sound {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            volume: 0.6,
+            combo_reset_secs: 5,
+        }
+    }
 }
 
 impl Default for Preview {
@@ -138,6 +159,12 @@ pub fn parse(text: &str) -> Result<(Config, Vec<String>)> {
     }
     if !(20.0..=2000.0).contains(&config.zoom.flashlight_radius) {
         bail!("zoom.flashlight_radius must be between 20 and 2000");
+    }
+    if !(0.0..=1.0).contains(&config.sound.volume) {
+        bail!("sound.volume must be between 0 and 1");
+    }
+    if !(1..=60).contains(&config.sound.combo_reset_secs) {
+        bail!("sound.combo_reset_secs must be between 1 and 60");
     }
     Ok((config, unknown))
 }
@@ -245,6 +272,26 @@ mod tests {
         let (config, _) = parse("[editor]\nbackend = \"satty\"\n").unwrap();
         assert_eq!(config.editor.backend, Backend::Satty);
         assert!(parse("[editor]\nbackend = \"gimp\"\n").is_err());
+    }
+
+    #[test]
+    fn sound_defaults_and_bounds() {
+        let s = Config::default().sound;
+        assert!(s.enabled);
+        assert_eq!((s.volume, s.combo_reset_secs), (0.6, 5));
+        for bad in ["volume = 1.5", "volume = nan", "volume = -0.1"] {
+            let err = parse(&format!("[sound]\n{bad}\n")).unwrap_err();
+            assert_eq!(
+                err.to_string(),
+                "sound.volume must be between 0 and 1",
+                "{bad}"
+            );
+        }
+        let err = parse("[sound]\ncombo_reset_secs = 0\n").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "sound.combo_reset_secs must be between 1 and 60"
+        );
     }
 
     #[test]

@@ -41,6 +41,7 @@ pub struct Picked {
     pub mode: Mode,
     pub cursor: bool,
     pub preview: bool,
+    pub sound: bool,
 }
 
 /// Shows the bar, waits for a pick, saves it, runs the countdown.
@@ -62,6 +63,7 @@ pub fn run(config: &Config) -> Result<Picked> {
         mode: picked.1,
         cursor: s.cursor,
         preview: s.preview,
+        sound: s.sound,
     })
 }
 
@@ -227,6 +229,7 @@ impl Toolbar {
                             MenuItem::Timer(t) => self.state.timer = t,
                             MenuItem::Cursor => self.state.cursor = !self.state.cursor,
                             MenuItem::Preview => self.state.preview = !self.state.preview,
+                            MenuItem::Sound => self.state.sound = !self.state.sound,
                         }
                         self.draw();
                     }
