@@ -126,3 +126,13 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - [ ] Esc or a click beside the bar closes it without capturing (exit 3).
 - [ ] A broken `toolbar.toml` doesn't stop the bar (warning in the log, defaults used).
 - [ ] Bind it in niri (Mod+Shift+5 is taken in copland; pick a key).
+
+### Known minors (deferred from the toolbar review)
+
+- A Wayland error during the countdown counts as a tick: the timer is skipped instead of failing.
+- Each hover change allocates a full-output buffer; the pool can grow large on 4K.
+- Hover isn't set when the pointer enters and isn't cleared when it leaves.
+- On two monitors, a click on the other one doesn't close the bar (Esc does).
+- With the menu open, a click elsewhere closes the whole bar, and option changes made before a cancel aren't saved.
+- The toolbar doesn't take the capture lock: two bars can stack, and a capture started during the countdown makes the toolbar's capture fail.
+- The bar can cover a bottom panel, while the countdown pill sits above it.
