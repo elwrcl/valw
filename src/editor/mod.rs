@@ -172,16 +172,19 @@ impl Editor {
 
     fn keys(&mut self, ctx: &egui::Context) {
         let shift_cmd = Modifiers::COMMAND | Modifiers::SHIFT;
-        let pressed = |m: Modifiers, k: Key| ctx.input_mut(|i| i.consume_key(m, k));
-        // Most specific first: consume_key ignores extra Shift.
+        // Holding a key must not save, copy or close again and again; undo
+        // and redo may repeat.
+        let pressed = |m: Modifiers, k: Key| ctx.input_mut(|i| take_press(&mut i.events, m, k));
+        let repeating = |m: Modifiers, k: Key| ctx.input_mut(|i| i.consume_key(m, k));
+        // Most specific first: extra Shift is ignored.
         if pressed(shift_cmd, Key::S) {
             self.save(true);
         } else if pressed(Modifiers::COMMAND, Key::S) && self.save(false) && self.confirm_close {
             self.close(ctx);
         }
-        if pressed(shift_cmd, Key::Z) || pressed(Modifiers::COMMAND, Key::Y) {
+        if repeating(shift_cmd, Key::Z) || repeating(Modifiers::COMMAND, Key::Y) {
             self.doc.redo();
-        } else if pressed(Modifiers::COMMAND, Key::Z) {
+        } else if repeating(Modifiers::COMMAND, Key::Z) {
             self.doc.undo();
         }
         if pressed(Modifiers::COMMAND, Key::C) {
@@ -344,6 +347,27 @@ impl Editor {
     }
 }
 
+/// Consumes presses of `key` with `modifiers` (extra Shift and Alt ignored,
+/// like egui's `consume_key`). True only for a fresh press: key repeats are
+/// swallowed without counting.
+fn take_press(events: &mut Vec<egui::Event>, modifiers: Modifiers, key: Key) -> bool {
+    let mut fresh = false;
+    events.retain(|event| match event {
+        egui::Event::Key {
+            key: k,
+            pressed: true,
+            repeat,
+            modifiers: m,
+            ..
+        } if *k == key && m.matches_logically(modifiers) => {
+            fresh |= !repeat;
+            false
+        }
+        _ => true,
+    });
+    fresh
+}
+
 /// Draws one primitive on the canvas.
 fn paint(painter: &egui::Painter, prim: &Prim, scale: f32, to_pos: impl Fn(shape::P) -> Pos2) {
     let color = |c: &[u8; 4]| Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]);
@@ -388,5 +412,50 @@ impl eframe::App for Editor {
             });
         }
         egui::CentralPanel::no_frame().show(ui, |ui| self.canvas(ui));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(key: Key, modifiers: Modifiers, repeat: bool) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat,
+            modifiers,
+        }
+    }
+
+    #[test]
+    fn held_keys_act_once() {
+        let mut events = vec![
+            key(Key::Escape, Modifiers::NONE, false),
+            key(Key::Escape, Modifiers::NONE, true),
+            key(Key::Escape, Modifiers::NONE, true),
+        ];
+        assert!(take_press(&mut events, Modifiers::NONE, Key::Escape));
+        assert!(events.is_empty(), "repeats are swallowed too");
+        let mut repeats = vec![key(Key::Escape, Modifiers::NONE, true)];
+        assert!(!take_press(&mut repeats, Modifiers::NONE, Key::Escape));
+    }
+
+    #[test]
+    fn modifiers_match_like_consume_key() {
+        let mut events = vec![key(Key::S, Modifiers::COMMAND | Modifiers::SHIFT, false)];
+        assert!(!take_press(
+            &mut events,
+            Modifiers::COMMAND | Modifiers::ALT,
+            Key::S
+        ));
+        assert!(
+            take_press(&mut events, Modifiers::COMMAND, Key::S),
+            "extra Shift ignored"
+        );
+        let mut plain = vec![key(Key::S, Modifiers::NONE, false)];
+        assert!(!take_press(&mut plain, Modifiers::COMMAND, Key::S));
+        assert_eq!(plain.len(), 1, "other events stay");
     }
 }
