@@ -15,6 +15,7 @@ mod output;
 mod region;
 mod render;
 mod selection;
+mod shadow;
 mod stack;
 mod thumbnail;
 mod toolbar;
@@ -232,11 +233,11 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
                 }
                 region::Choice::Window => {
                     drop(frames);
-                    window_shot(&outputs, cursor)?
+                    window_shot(&outputs, cursor, config.capture.window_shadow)?
                 }
             }
         }
-        Mode::Window => window_shot(&outputs, cursor)?,
+        Mode::Window => window_shot(&outputs, cursor, config.capture.window_shadow)?,
         Mode::Zoom => {
             let focused = focused_output(&outputs);
             let frame = wl.capture(&outputs[focused..=focused], cursor)?.remove(0);
@@ -278,8 +279,9 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
 
 /// A window shot, shaped like the other modes' results. The preview goes to
 /// the window's output, or niri's focused one if that is unknown.
-fn window_shot(outputs: &[wayland::Output], cursor: bool) -> Result<Shots> {
+fn window_shot(outputs: &[wayland::Output], cursor: bool, shadow: bool) -> Result<Shots> {
     let (image, output) = window::capture(cursor)?;
+    let image = if shadow { shadow::add(&image) } else { image };
     let source = output.unwrap_or_else(|| outputs[focused_output(outputs)].geom.name.clone());
     Ok((vec![(image, None)], 0, source))
 }

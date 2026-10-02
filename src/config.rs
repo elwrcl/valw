@@ -27,6 +27,8 @@ pub struct Save {
 #[serde(default)]
 pub struct Capture {
     pub show_cursor: bool,
+    /// A soft shadow around window shots, like macOS.
+    pub window_shadow: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -169,6 +171,7 @@ mod tests {
         assert!(!config.save.copy_to_clipboard);
         assert_eq!(config.save.directory, "~/Pictures/Screenshots");
         assert!(!config.capture.show_cursor);
+        assert!(!config.capture.window_shadow);
     }
 
     #[test]
