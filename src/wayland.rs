@@ -42,6 +42,7 @@ use crate::error::HintExt;
 use crate::frame::OutputGeom;
 use crate::host::Host;
 use crate::region::Overlay;
+use crate::zoom::Zoom;
 
 /// An output as valw sees it.
 #[derive(Debug, Clone)]
@@ -80,6 +81,8 @@ pub struct State {
     pub captures: Vec<Pending>,
     /// The region selection overlay, while it is open.
     pub overlay: Option<Overlay>,
+    /// Zoom mode, while it is open.
+    pub zoom: Option<Zoom>,
     /// The preview thumbnails, in the preview host process.
     pub preview: Option<Host>,
 }
@@ -111,6 +114,7 @@ impl Wayland {
             pointer: None,
             captures: Vec::new(),
             overlay: None,
+            zoom: None,
             preview: None,
         };
         // Two round trips: one for wl_output, one for the xdg-output details.
@@ -297,6 +301,9 @@ impl CompositorHandler for State {
         if let Some(overlay) = &mut self.overlay {
             overlay.frame_done(surface, qh);
         }
+        if let Some(zoom) = &mut self.zoom {
+            zoom.frame_done(surface, qh);
+        }
         if let Some(preview) = &mut self.preview {
             preview.frame_done(surface, qh);
         }
@@ -338,6 +345,9 @@ impl LayerShellHandler for State {
         if let Some(overlay) = &mut self.overlay {
             overlay.cancel();
         }
+        if let Some(zoom) = &mut self.zoom {
+            zoom.closed(layer);
+        }
         if let Some(preview) = &mut self.preview {
             preview.closed(layer);
         }
@@ -353,6 +363,9 @@ impl LayerShellHandler for State {
     ) {
         if let Some(overlay) = &mut self.overlay {
             overlay.configure(layer, configure.new_size, qh);
+        }
+        if let Some(zoom) = &mut self.zoom {
+            zoom.configure(layer, configure.new_size, qh);
         }
         if let Some(preview) = &mut self.preview {
             preview.configure(layer, qh);
@@ -444,18 +457,20 @@ impl KeyboardHandler for State {
     fn press_key(
         &mut self,
         _: &Connection,
-        _: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
         _: u32,
         event: KeyEvent,
     ) {
-        let Some(overlay) = &mut self.overlay else {
-            return;
-        };
-        match event.keysym {
-            Keysym::Escape => overlay.cancel(),
-            Keysym::space => overlay.switch_to_window(),
-            _ => {}
+        if let Some(overlay) = &mut self.overlay {
+            match event.keysym {
+                Keysym::Escape => overlay.cancel(),
+                Keysym::space => overlay.switch_to_window(),
+                _ => {}
+            }
+        }
+        if let Some(zoom) = &mut self.zoom {
+            zoom.key(event.keysym, qh);
         }
     }
 
@@ -485,10 +500,13 @@ impl KeyboardHandler for State {
         _: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
         _: u32,
-        _: Modifiers,
+        modifiers: Modifiers,
         _: RawModifiers,
         _: u32,
     ) {
+        if let Some(zoom) = &mut self.zoom {
+            zoom.modifiers(modifiers);
+        }
     }
 }
 
@@ -502,6 +520,9 @@ impl PointerHandler for State {
     ) {
         if let Some(overlay) = &mut self.overlay {
             overlay.pointer(events, self.cursor_device.as_ref(), qh);
+        }
+        if let Some(zoom) = &mut self.zoom {
+            zoom.pointer(events, self.cursor_device.as_ref(), qh);
         }
         if self.preview.is_some() {
             crate::host::pointer(self, events, qh);

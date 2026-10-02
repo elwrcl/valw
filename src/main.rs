@@ -1,6 +1,3 @@
-// Zoom lands in pieces; Task 3 removes this.
-#![allow(dead_code)]
-
 mod capture;
 mod config;
 mod detach;
@@ -66,6 +63,11 @@ enum Command {
         #[command(flatten)]
         common: Common,
     },
+    /// Freeze the screen and zoom in: wheel, drag, f, c, 0, Esc.
+    Zoom {
+        #[command(flatten)]
+        common: Common,
+    },
     /// Report what the compositor and system support.
     Doctor,
     /// Internal: the process that shows preview thumbnails.
@@ -106,6 +108,7 @@ enum Mode {
     Screen { all: bool },
     Region,
     Window,
+    Zoom,
 }
 
 fn main() -> ExitCode {
@@ -139,6 +142,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Screen { all, common } => capture(Mode::Screen { all }, common),
         Command::Region { common } => capture(Mode::Region, common),
         Command::Window { common } => capture(Mode::Window, common),
+        Command::Zoom { common } => capture(Mode::Zoom, common),
     }
 }
 
@@ -188,6 +192,20 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
             }
         }
         Mode::Window => window_shot(&outputs, cursor)?,
+        Mode::Zoom => {
+            let focused = focused_output(&outputs);
+            let frame = wl.capture(&outputs[focused..=focused], cursor)?.remove(0);
+            match zoom::run(&mut wl, &outputs[focused], &frame, &config.zoom)? {
+                zoom::Outcome::Capture(r) => {
+                    let source = frame.output.name.clone();
+                    (vec![(frame.to_rgba(r), None)], 0, source)
+                }
+                zoom::Outcome::Leave => {
+                    tracing::info!("left zoom without capturing");
+                    return Ok(());
+                }
+            }
+        }
     };
     drop(wl);
 
@@ -313,6 +331,8 @@ mod tests {
         assert!(parses(&["screen", "--all", "--no-preview"]));
         assert!(parses(&["window", "--cursor", "--delay", "2"]));
         assert!(!parses(&["window", "--clipboard-only", "-o", "a.png"]));
+        assert!(parses(&["zoom", "--cursor", "--no-preview"]));
+        assert!(!parses(&["zoom", "--clipboard-only", "-o", "a.png"]));
     }
 
     #[test]
