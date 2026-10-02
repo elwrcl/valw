@@ -82,8 +82,10 @@ pub fn paint(canvas: &mut [u8], canvas_width: u32, small: &RgbaImage, x0: i64) {
             let px = if edge {
                 BORDER
             } else {
-                let [r, g, b, _] = small.get_pixel(x, y).0;
-                [b, g, r, 255]
+                // wl_shm's ARGB is premultiplied; window shots have alpha.
+                let [r, g, b, a] = small.get_pixel(x, y).0;
+                let pre = |c: u8| (u16::from(c) * u16::from(a) / 255) as u8;
+                [pre(b), pre(g), pre(r), a]
             };
             let i = ((y * canvas_width) as usize + cx as usize) * 4;
             canvas[i..i + 4].copy_from_slice(&px);
@@ -589,6 +591,25 @@ mod tests {
         assert_eq!(pixel(&canvas, 6, 3, 1), BORDER);
         assert_eq!(pixel(&canvas, 6, 4, 1), [0; 4], "padding is transparent");
         assert_eq!(pixel(&canvas, 6, 5, 2), [0; 4]);
+    }
+
+    #[test]
+    fn paint_keeps_transparency_premultiplied() {
+        // Window shots have transparent rounded corners and shadows.
+        let mut img = RgbaImage::from_pixel(4, 3, image::Rgba([0, 0, 0, 0]));
+        img.put_pixel(2, 1, image::Rgba([255, 100, 0, 128]));
+        let mut canvas = vec![9u8; 4 * 3 * 4];
+        paint(&mut canvas, 4, &img, 0);
+        assert_eq!(
+            pixel(&canvas, 4, 1, 1),
+            [0; 4],
+            "transparent stays transparent"
+        );
+        assert_eq!(
+            pixel(&canvas, 4, 2, 1),
+            [0, 50, 128, 128],
+            "premultiplied BGRA"
+        );
     }
 
     #[test]
