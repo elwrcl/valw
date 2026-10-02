@@ -50,6 +50,8 @@ pub struct Overlay {
     anchor: Option<usize>,
     /// Shift, Alt and Space as the keyboard last reported them.
     mods: Mods,
+    /// The surface the pointer is on and its surface-local position.
+    pointer: Option<(usize, (f64, f64))>,
     outcome: Option<Option<Choice>>,
 }
 
@@ -112,6 +114,7 @@ pub fn select(wl: &mut Wayland, outputs: &[Output], frames: &[Frame]) -> Result<
         selection: Selection::default(),
         anchor: None,
         mods: Mods::default(),
+        pointer: None,
         outcome: None,
     });
     let result = wl.dispatch_blocking(|s| s.overlay.as_ref().is_some_and(|o| o.outcome.is_some()));
@@ -143,7 +146,12 @@ impl Surface {
         })
     }
 
-    fn draw(&mut self, sel: Option<PixelRect>, qh: &QueueHandle<State>) {
+    fn draw(
+        &mut self,
+        sel: Option<PixelRect>,
+        label: Option<(PixelRect, (f64, f64))>,
+        qh: &QueueHandle<State>,
+    ) {
         let stride = self.width as i32 * 4;
         let Ok((buffer, canvas)) = self.pool.create_buffer(
             self.width as i32,
@@ -155,6 +163,22 @@ impl Surface {
             return;
         };
         render::compose(canvas, &self.dark, self.bright.as_raw(), self.width, sel);
+        if let Some((rect, (px, py))) = label {
+            let scale = self.width as f64 / self.geom.width as f64;
+            let text = render::size_text(rect);
+            let size = (
+                ((crate::toolbar::draw::measure(&text) + 12.0) as f64 * scale).ceil() as u32,
+                ((crate::toolbar::draw::LABEL * 1.2 + 12.0) as f64 * scale).ceil() as u32,
+            );
+            let pill = crate::toolbar::draw::pill(size, scale as f32, &text);
+            let at = render::label_origin(
+                (px * scale, py * scale),
+                (pill.width(), pill.height()),
+                (self.width, self.height),
+                16.0 * scale,
+            );
+            render::blend(canvas, self.width, &pill, at);
+        }
 
         let surface = self.layer.wl_surface();
         surface.damage_buffer(0, 0, self.width as i32, self.height as i32);
@@ -223,10 +247,12 @@ impl Overlay {
 
     fn redraw(&mut self, i: usize, qh: &QueueHandle<State>) {
         let sel = self.selection_on(i);
+        // The size label goes next to the pointer, on the output it is on.
+        let label = sel.zip(self.pointer.filter(|(on, _)| *on == i).map(|(_, at)| at));
         let s = &mut self.surfaces[i];
         s.dirty = true;
         if s.configured && !s.frame_pending {
-            s.draw(sel, qh);
+            s.draw(sel, label, qh);
         }
     }
 
@@ -268,6 +294,7 @@ impl Overlay {
             let Some(i) = self.index_of(&event.surface) else {
                 continue;
             };
+            self.pointer = Some((i, event.position));
             let g = &self.surfaces[i].geom;
             let p = Point {
                 x: g.x as f64 + event.position.0,
