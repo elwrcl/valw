@@ -16,6 +16,9 @@ mod region;
 mod render;
 mod selection;
 mod shadow;
+// The sound lands in two tasks; Task 5 of the polish plan removes this.
+#[allow(dead_code)]
+mod sound;
 mod stack;
 mod thumbnail;
 mod toolbar;
