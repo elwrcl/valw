@@ -1,3 +1,4 @@
+use std::io;
 use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -53,15 +54,12 @@ pub fn screenshot_window(id: u64, path: &Path, cursor: bool, timeout: Duration) 
         .send(Request::EventStream)
         .context("niri IPC request failed")?
         .map_err(|e| anyhow!("niri replied with an error: {e}"))?;
-    let mut read = events.read_events();
+    let read = events.read_events();
     let (tx, rx) = mpsc::channel();
     let wanted = path.to_path_buf();
     std::thread::spawn(move || {
-        while let Ok(event) = read() {
-            if is_our_capture(&event, &wanted) {
-                let _ = tx.send(());
-                return;
-            }
+        if wait_for_capture(read, &wanted) {
+            let _ = tx.send(());
         }
     });
 
@@ -77,12 +75,30 @@ pub fn screenshot_window(id: u64, path: &Path, cursor: bool, timeout: Duration) 
         Response::Handled => {}
         other => bail!("unexpected niri reply: {other:?}"),
     }
-    rx.recv_timeout(timeout).map_err(|_| {
-        anyhow!(
+    rx.recv_timeout(timeout).map_err(|e| match e {
+        mpsc::RecvTimeoutError::Timeout => anyhow!(
             "niri did not deliver the window screenshot within {}s",
             timeout.as_secs()
-        )
+        ),
+        mpsc::RecvTimeoutError::Disconnected => {
+            anyhow!("niri's event stream ended before the window screenshot arrived")
+        }
     })
+}
+
+/// Reads events until the one for `path`. Events this niri-ipc can't parse
+/// (a newer niri) are skipped; `false` when the stream ends.
+fn wait_for_capture(mut read: impl FnMut() -> io::Result<Event>, path: &Path) -> bool {
+    loop {
+        match read() {
+            Ok(event) if is_our_capture(&event, path) => return true,
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+                tracing::debug!("skipping a niri event: {e}");
+            }
+            Err(_) => return false,
+        }
+    }
 }
 
 /// Whether `event` reports the screenshot written to `path`. niri reports
@@ -148,6 +164,30 @@ mod tests {
             "niri's own binding"
         );
         assert!(!is_our_capture(&Event::WindowClosed { id: 3 }, ours));
+    }
+
+    #[test]
+    fn waiting_skips_events_it_cannot_parse() {
+        let ours = Path::new("/run/user/1000/valw-window-7.png");
+        let mut events = vec![
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unknown variant",
+            )),
+            Ok(Event::WindowClosed { id: 3 }),
+            Ok(Event::ScreenshotCaptured {
+                path: Some(ours.to_string_lossy().into_owned()),
+            }),
+        ]
+        .into_iter();
+        assert!(wait_for_capture(|| events.next().unwrap(), ours));
+    }
+
+    #[test]
+    fn waiting_stops_when_the_stream_ends() {
+        let ours = Path::new("/run/user/1000/valw-window-7.png");
+        let eof = || Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+        assert!(!wait_for_capture(eof, ours));
     }
 
     #[test]
