@@ -73,6 +73,8 @@ struct Editor {
     confirm_close: bool,
     /// The user chose to close; let the close through.
     closing: bool,
+    /// Puts a PNG on the clipboard (replaced in tests).
+    clipboard: Box<dyn FnMut(Vec<u8>) -> Result<()>>,
 }
 
 impl Editor {
@@ -96,6 +98,7 @@ impl Editor {
             status: None,
             confirm_close: false,
             closing: false,
+            clipboard: Box::new(clipboard_child),
         }
     }
 
@@ -116,6 +119,8 @@ impl Editor {
     }
 
     fn save(&mut self, copy: bool) -> bool {
+        // What is being typed is on the canvas, so it belongs in the file.
+        self.finish_typing();
         let target = if copy {
             export::edited_path(&self.path)
         } else {
@@ -142,30 +147,8 @@ impl Editor {
     }
 
     fn copy(&mut self) {
-        let result = self.png().and_then(|png| {
-            use std::os::unix::process::CommandExt;
-            let exe = std::env::current_exe().context("no path to valw")?;
-            let mut command = std::process::Command::new(exe);
-            command
-                .arg("__clipboard")
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-            // SAFETY: setsid is async-signal-safe.
-            unsafe {
-                command.pre_exec(|| rustix::process::setsid().map(drop).map_err(Into::into));
-            }
-            let mut child = command
-                .spawn()
-                .context("could not start the clipboard server")?;
-            child
-                .stdin
-                .take()
-                .context("no stdin")?
-                .write_all(&png)
-                .context("could not hand over the image")?;
-            Ok(())
-        });
+        self.finish_typing();
+        let result = self.png().and_then(|png| (self.clipboard)(png));
         match result {
             Ok(()) => self.say("Copied"),
             Err(e) => {
@@ -201,7 +184,13 @@ impl Editor {
         } else if repeating(Modifiers::COMMAND, Key::Z) {
             self.doc.undo();
         }
-        if pressed(Modifiers::COMMAND, Key::C) {
+        // egui-winit turns Ctrl+C into Event::Copy, not a key event.
+        let copy_event = ctx.input_mut(|i| {
+            let before = i.events.len();
+            i.events.retain(|e| !matches!(e, egui::Event::Copy));
+            i.events.len() != before
+        });
+        if copy_event || pressed(Modifiers::COMMAND, Key::C) {
             self.copy();
         }
         if self.cropping.is_some() {
@@ -238,7 +227,11 @@ impl Editor {
 
     /// The compositor asked to close: with unsaved changes, show the bar instead.
     fn guard_close(&mut self, ctx: &egui::Context) {
-        if ctx.input(|i| i.viewport().close_requested()) && self.doc.is_dirty() && !self.closing {
+        if !ctx.input(|i| i.viewport().close_requested()) || self.closing {
+            return;
+        }
+        self.finish_typing();
+        if self.doc.is_dirty() {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             self.confirm_close = true;
         }
@@ -287,12 +280,14 @@ impl Editor {
                 .add_enabled(self.doc.can_undo(), egui::Button::new("Undo"))
                 .clicked()
             {
+                self.finish_typing();
                 self.doc.undo();
             }
             if ui
                 .add_enabled(self.doc.can_redo(), egui::Button::new("Redo"))
                 .clicked()
             {
+                self.finish_typing();
                 self.doc.redo();
             }
             ui.separator();
@@ -366,16 +361,43 @@ impl Editor {
             (a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y))
         };
 
+        // Text and Number act on the press itself: a touchpad tap presses
+        // and releases in one frame, which egui never reports as a drag.
+        // The press position comes from the event: after a same-frame
+        // release egui has already forgotten the press origin.
+        let press = ui.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    ..
+                } => Some(*pos),
+                _ => None,
+            })
+        });
+        let mut used = false;
+        if let Some(at) = press
+            && response.contains_pointer()
+            && response.rect.contains(at)
+        {
+            if self.typing.is_some() {
+                // A press anywhere on the canvas only finishes the text.
+                self.finish_typing();
+                used = true;
+            } else if matches!(self.tool, Tool::Text | Tool::Number) && image_rect.contains(at) {
+                let p = view::clamp(fit.to_image((at.x, at.y)), shown);
+                self.press(p, crop_screen, (at.x, at.y));
+                used = true;
+            }
+        }
         if response.drag_started()
+            && !used
+            && !matches!(self.tool, Tool::Text | Tool::Number)
             && let (Some(p), Some(at)) = (pointer, screen)
             && (image_rect.contains(at) || self.tool == Tool::Crop)
         {
-            if self.typing.is_some() {
-                // A press elsewhere only finishes the text.
-                self.finish_typing();
-            } else {
-                self.press(p, crop_screen, (at.x, at.y));
-            }
+            self.press(p, crop_screen, (at.x, at.y));
         }
         if response.dragged()
             && let Some(p) = pointer
@@ -590,6 +612,33 @@ impl Editor {
     }
 }
 
+/// Hands `png` to a detached `valw __clipboard`, which serves it after the
+/// editor has closed.
+fn clipboard_child(png: Vec<u8>) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    let exe = std::env::current_exe().context("no path to valw")?;
+    let mut command = std::process::Command::new(exe);
+    command
+        .arg("__clipboard")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    // SAFETY: setsid is async-signal-safe.
+    unsafe {
+        command.pre_exec(|| rustix::process::setsid().map(drop).map_err(Into::into));
+    }
+    let mut child = command
+        .spawn()
+        .context("could not start the clipboard server")?;
+    child
+        .stdin
+        .take()
+        .context("no stdin")?
+        .write_all(&png)
+        .context("could not hand over the image")?;
+    Ok(())
+}
+
 /// How close (screen px) a press must be to grab a crop edge.
 const CROP_GRAB: f32 = 8.0;
 const CARET_BLINK: Duration = Duration::from_millis(500);
@@ -699,6 +748,13 @@ fn paint(painter: &egui::Painter, prim: &Prim, scale: f32, to_pos: impl Fn(shape
 
 impl eframe::App for Editor {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.frame_ui(ui);
+    }
+}
+
+impl Editor {
+    /// One frame of the whole window.
+    fn frame_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.keys(&ctx);
         self.guard_close(&ctx);
@@ -724,6 +780,113 @@ impl eframe::App for Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    type Copies = Rc<RefCell<Vec<Vec<u8>>>>;
+
+    /// An editor on a white 400×300 image in a temp dir, with the clipboard
+    /// recorded instead of served.
+    fn editor(dir: &Path) -> (egui::Context, Editor, Copies) {
+        let ctx = egui::Context::default();
+        let path = dir.join("shot.png");
+        let base = RgbaImage::from_pixel(400, 300, image::Rgba([255, 255, 255, 255]));
+        base.save(&path).unwrap();
+        let mut e = Editor::new(&ctx, path, base);
+        let copies = Copies::default();
+        let sink = copies.clone();
+        e.clipboard = Box::new(move |png| {
+            sink.borrow_mut().push(png);
+            Ok(())
+        });
+        (ctx, e, copies)
+    }
+
+    fn frame(ctx: &egui::Context, e: &mut Editor, events: Vec<egui::Event>, close: bool) {
+        let mut input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0))),
+            events,
+            ..Default::default()
+        };
+        if close {
+            input.viewports.insert(
+                egui::ViewportId::ROOT,
+                egui::ViewportInfo {
+                    events: vec![egui::ViewportEvent::Close],
+                    ..Default::default()
+                },
+            );
+        }
+        ctx.run_ui(input, |ui| e.frame_ui(ui))
+            .drop_without_applying_deltas();
+    }
+
+    /// A press and release in the same frame, like a touchpad tap.
+    fn tap(at: Pos2) -> Vec<egui::Event> {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        vec![egui::Event::PointerMoved(at), button(true), button(false)]
+    }
+
+    fn typing(text: &str) -> Option<Typing> {
+        Some(Typing {
+            at: (10.0, 10.0),
+            text: text.into(),
+        })
+    }
+
+    #[test]
+    fn ctrl_c_copies() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ctx, mut e, copies) = editor(dir.path());
+        frame(&ctx, &mut e, vec![egui::Event::Copy], false);
+        assert_eq!(copies.borrow().len(), 1);
+    }
+
+    #[test]
+    fn save_and_copy_include_the_text_being_typed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_ctx, mut e, copies) = editor(dir.path());
+        e.typing = typing("Hi");
+        assert!(e.save(false));
+        assert!(e.typing.is_none());
+        assert_eq!(e.doc.shapes().count(), 1);
+        assert!(!e.doc.is_dirty());
+        e.typing = typing("there");
+        e.copy();
+        assert_eq!(e.doc.shapes().count(), 2);
+        assert_eq!(copies.borrow().len(), 1);
+    }
+
+    #[test]
+    fn closing_while_typing_keeps_the_text_and_asks() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ctx, mut e, _) = editor(dir.path());
+        frame(&ctx, &mut e, vec![], false);
+        e.typing = typing("label");
+        frame(&ctx, &mut e, vec![], true);
+        assert!(e.typing.is_none());
+        assert_eq!(e.doc.shapes().count(), 1);
+        assert!(e.confirm_close, "the unsaved bar shows instead of closing");
+    }
+
+    #[test]
+    fn a_tap_places_a_number_and_starts_a_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let (ctx, mut e, _) = editor(dir.path());
+        frame(&ctx, &mut e, vec![], false);
+        e.tool = Tool::Number;
+        frame(&ctx, &mut e, tap(Pos2::new(400.0, 330.0)), false);
+        assert_eq!(e.doc.next_number(), 2, "the tap placed number 1");
+        e.tool = Tool::Text;
+        frame(&ctx, &mut e, tap(Pos2::new(380.0, 330.0)), false);
+        assert!(e.typing.is_some());
+    }
 
     fn key(key: Key, modifiers: Modifiers, repeat: bool) -> egui::Event {
         egui::Event::Key {
