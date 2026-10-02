@@ -42,6 +42,7 @@ use crate::error::HintExt;
 use crate::frame::OutputGeom;
 use crate::host::Host;
 use crate::region::Overlay;
+use crate::toolbar::{Pill, Toolbar};
 use crate::zoom::Zoom;
 
 /// An output as valw sees it.
@@ -83,6 +84,9 @@ pub struct State {
     pub overlay: Option<Overlay>,
     /// Zoom mode, while it is open.
     pub zoom: Option<Zoom>,
+    /// The toolbar and its countdown, while they are open.
+    pub toolbar: Option<Toolbar>,
+    pub pill: Option<Pill>,
     /// The preview thumbnails, in the preview host process.
     pub preview: Option<Host>,
 }
@@ -115,6 +119,8 @@ impl Wayland {
             captures: Vec::new(),
             overlay: None,
             zoom: None,
+            toolbar: None,
+            pill: None,
             preview: None,
         };
         // Two round trips: one for wl_output, one for the xdg-output details.
@@ -348,6 +354,12 @@ impl LayerShellHandler for State {
         if let Some(zoom) = &mut self.zoom {
             zoom.closed(layer);
         }
+        if let Some(toolbar) = &mut self.toolbar {
+            toolbar.closed(layer);
+        }
+        if let Some(pill) = &mut self.pill {
+            pill.closed(layer);
+        }
         if let Some(preview) = &mut self.preview {
             preview.closed(layer);
         }
@@ -366,6 +378,12 @@ impl LayerShellHandler for State {
         }
         if let Some(zoom) = &mut self.zoom {
             zoom.configure(layer, configure.new_size, qh);
+        }
+        if let Some(toolbar) = &mut self.toolbar {
+            toolbar.configure(layer, configure.new_size);
+        }
+        if let Some(pill) = &mut self.pill {
+            pill.configure(layer);
         }
         if let Some(preview) = &mut self.preview {
             preview.configure(layer, qh);
@@ -472,6 +490,9 @@ impl KeyboardHandler for State {
         if let Some(zoom) = &mut self.zoom {
             zoom.key(event.keysym, qh);
         }
+        if let Some(toolbar) = &mut self.toolbar {
+            toolbar.key(event.keysym);
+        }
     }
 
     fn repeat_key(
@@ -523,6 +544,12 @@ impl PointerHandler for State {
         }
         if let Some(zoom) = &mut self.zoom {
             zoom.pointer(events, self.cursor_device.as_ref(), qh);
+        }
+        if let Some(toolbar) = &mut self.toolbar {
+            toolbar.pointer(events, self.cursor_device.as_ref());
+        }
+        if let Some(pill) = &mut self.pill {
+            pill.pointer(events);
         }
         if self.preview.is_some() {
             crate::host::pointer(self, events, qh);

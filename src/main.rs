@@ -1,6 +1,3 @@
-// The toolbar lands in pieces; Task 3 removes this.
-#![allow(dead_code)]
-
 mod capture;
 mod config;
 mod detach;
@@ -78,6 +75,8 @@ enum Command {
         /// The image to edit.
         file: PathBuf,
     },
+    /// Pick a mode from a floating bar (Cmd+Shift+5).
+    Toolbar,
     /// Report what the compositor and system support.
     Doctor,
     /// Internal: the process that shows preview thumbnails.
@@ -157,6 +156,11 @@ fn run(cli: Cli) -> Result<()> {
         Command::Window { common } => capture(Mode::Window, common),
         Command::Zoom { common } => capture(Mode::Zoom, common),
         Command::Edit { file } => editor::run(&file),
+        Command::Toolbar => {
+            let config = config::load(&config::default_path())?;
+            let (mode, common) = from_toolbar(toolbar::run(&config)?);
+            capture(mode, common)
+        }
         Command::Clipboard => {
             let mut png = Vec::new();
             std::io::Read::read_to_end(&mut std::io::stdin(), &mut png)
@@ -260,8 +264,26 @@ fn window_shot(outputs: &[wayland::Output], cursor: bool) -> Result<Shots> {
     Ok((vec![(image, None)], 0, source))
 }
 
+/// What the toolbar picked, as the command line would have said it.
+fn from_toolbar(pick: toolbar::Picked) -> (Mode, Common) {
+    let mode = match pick.mode {
+        toolbar::state::Mode::Screen => Mode::Screen { all: false },
+        toolbar::state::Mode::Window => Mode::Window,
+        toolbar::state::Mode::Region => Mode::Region,
+        toolbar::state::Mode::Zoom => Mode::Zoom,
+    };
+    let common = Common {
+        clipboard_only: false,
+        output: None,
+        delay: None,
+        cursor: pick.cursor,
+        no_preview: !pick.preview,
+    };
+    (mode, common)
+}
+
 /// Index of niri's focused output, or 0 if niri can't tell us.
-fn focused_output(outputs: &[wayland::Output]) -> usize {
+pub(crate) fn focused_output(outputs: &[wayland::Output]) -> usize {
     let name = match niri::focused_output() {
         Ok(Some(name)) => name,
         Ok(None) => return 0,
@@ -356,6 +378,36 @@ mod tests {
         assert!(parses(&["edit", "a.png"]));
         assert!(!parses(&["edit"]));
         assert!(parses(&["__clipboard"]));
+        assert!(parses(&["toolbar"]));
+    }
+
+    #[test]
+    fn a_toolbar_pick_becomes_a_capture() {
+        use toolbar::state::Mode as T;
+        let pick = |mode, cursor, preview| toolbar::Picked {
+            mode,
+            cursor,
+            preview,
+        };
+        let (mode, common) = from_toolbar(pick(T::Screen, true, false));
+        assert!(matches!(mode, Mode::Screen { all: false }));
+        assert!(common.cursor && common.no_preview);
+        assert!(matches!(
+            from_toolbar(pick(T::Window, false, true)).0,
+            Mode::Window
+        ));
+        assert!(matches!(
+            from_toolbar(pick(T::Region, false, true)).0,
+            Mode::Region
+        ));
+        let (mode, common) = from_toolbar(pick(T::Zoom, false, true));
+        assert!(matches!(mode, Mode::Zoom));
+        assert!(
+            !common.cursor
+                && !common.no_preview
+                && common.delay.is_none()
+                && common.output.is_none()
+        );
     }
 
     #[test]
