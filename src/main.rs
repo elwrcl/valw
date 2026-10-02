@@ -172,9 +172,16 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
         }
         Mode::Region => {
             let frames = wl.capture(&outputs, cursor)?;
-            let (i, r) = region::select(&mut wl, &outputs, &frames)?;
-            let source = frames[i].output.name.clone();
-            (vec![(frames[i].to_rgba(r), None)], 0, source)
+            match region::select(&mut wl, &outputs, &frames)? {
+                region::Choice::Region(i, r) => {
+                    let source = frames[i].output.name.clone();
+                    (vec![(frames[i].to_rgba(r), None)], 0, source)
+                }
+                region::Choice::Window => {
+                    drop(frames);
+                    window_shot(&outputs, cursor)?
+                }
+            }
         }
         Mode::Window => window_shot(&outputs, cursor)?,
     };

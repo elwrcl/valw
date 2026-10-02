@@ -30,8 +30,14 @@ use crate::wayland::{Output, State, Wayland};
 
 pub const NAMESPACE: &str = "valw-overlay";
 
-/// What the user picked: an output index and a rectangle in its frame.
-pub type Picked = (usize, PixelRect);
+/// What the user chose in the overlay.
+#[derive(Debug, PartialEq)]
+pub enum Choice {
+    /// A rectangle in the frame of output `.0`.
+    Region(usize, PixelRect),
+    /// Space before dragging: capture a window instead.
+    Window,
+}
 
 /// One full-screen layer surface per output, showing the frozen frame.
 pub struct Overlay {
@@ -39,7 +45,7 @@ pub struct Overlay {
     selection: Selection,
     /// Output where the current drag started; the capture is clipped to it.
     anchor: Option<usize>,
-    outcome: Option<Option<Picked>>,
+    outcome: Option<Option<Choice>>,
 }
 
 struct Surface {
@@ -59,7 +65,8 @@ struct Surface {
 
 /// Shows the overlay on every output and waits for a selection.
 /// Returns `Cancelled` if the user presses Esc or right-clicks.
-pub fn select(wl: &mut Wayland, outputs: &[Output], frames: &[Frame]) -> Result<Picked> {
+/// Space before dragging returns `Choice::Window`.
+pub fn select(wl: &mut Wayland, outputs: &[Output], frames: &[Frame]) -> Result<Choice> {
     let qh = wl.queue.handle();
     let s = &wl.state;
     let layer_shell = s
@@ -160,6 +167,13 @@ impl Surface {
 impl Overlay {
     pub fn cancel(&mut self) {
         self.outcome.get_or_insert(None);
+    }
+
+    pub fn switch_to_window(&mut self) {
+        if self.selection.allows_window_switch() {
+            tracing::info!("switching to window mode");
+            self.outcome.get_or_insert(Some(Choice::Window));
+        }
     }
 
     fn index_of(&self, surface: &WlSurface) -> Option<usize> {
@@ -266,7 +280,7 @@ impl Overlay {
                                 "selected {rect:?} on {} (logical {start:?} to {end:?})",
                                 s.geom.name
                             );
-                            self.outcome = Some(Some((a, rect)));
+                            self.outcome = Some(Some(Choice::Region(a, rect)));
                         }
                         // A click, not a drag: clear it and keep waiting.
                         None => self.redraw(a, qh),

@@ -38,6 +38,11 @@ impl Selection {
             Selection::Idle => None,
         }
     }
+
+    /// Space switches to window mode only before a drag starts.
+    pub fn allows_window_switch(&self) -> bool {
+        *self == Selection::Idle
+    }
 }
 
 /// The part of the drag from `a` to `b` that falls on `out`, in the physical
@@ -76,6 +81,16 @@ pub fn resolve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn window_switch_only_before_a_drag() {
+        let mut s = Selection::default();
+        assert!(s.allows_window_switch());
+        s.press(Point { x: 1.0, y: 1.0 });
+        assert!(!s.allows_window_switch(), "Space during a drag is reserved");
+        s.release(Point { x: 5.0, y: 5.0 });
+        assert!(s.allows_window_switch());
+    }
 
     fn out(name: &str, x: i32, y: i32, width: i32, height: i32) -> OutputGeom {
         OutputGeom {

@@ -449,10 +449,13 @@ impl KeyboardHandler for State {
         _: u32,
         event: KeyEvent,
     ) {
-        if event.keysym == Keysym::Escape
-            && let Some(overlay) = &mut self.overlay
-        {
-            overlay.cancel();
+        let Some(overlay) = &mut self.overlay else {
+            return;
+        };
+        match event.keysym {
+            Keysym::Escape => overlay.cancel(),
+            Keysym::space => overlay.switch_to_window(),
+            _ => {}
         }
     }
 
