@@ -1,3 +1,6 @@
+// The toolbar lands in pieces; Task 3 removes this.
+#![allow(dead_code)]
+
 mod capture;
 mod config;
 mod detach;
@@ -17,6 +20,7 @@ mod render;
 mod selection;
 mod stack;
 mod thumbnail;
+mod toolbar;
 mod wayland;
 mod window;
 mod zoom;
