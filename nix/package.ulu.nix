@@ -34,8 +34,10 @@
         doCheck = false;
 
         # Clicking a preview opens Satty if configured. --suffix keeps a user's own Satty first.
+        # The editor embeds DejaVu Sans Bold; its licence wants the notice shipped.
         postInstall = ''
           wrapProgram $out/bin/valw --suffix PATH : ${lib.makeBinPath [ pkgs.satty ]}
+          install -Dm644 assets/fonts/LICENSE-DejaVu $out/share/licenses/valw/LICENSE-DejaVu
         '';
 
         # dlopen()ed at run time: libwayland (winit, valw), libxkbcommon (winit),
