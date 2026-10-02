@@ -1,3 +1,6 @@
+// Zoom lands in pieces; Task 3 removes this.
+#![allow(dead_code)]
+
 mod capture;
 mod config;
 mod detach;
@@ -18,6 +21,7 @@ mod stack;
 mod thumbnail;
 mod wayland;
 mod window;
+mod zoom;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

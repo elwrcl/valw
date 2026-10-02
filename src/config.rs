@@ -11,6 +11,7 @@ pub struct Config {
     pub save: Save,
     pub capture: Capture,
     pub preview: Preview,
+    pub zoom: Zoom,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -32,6 +33,22 @@ pub struct Capture {
 pub struct Preview {
     pub enabled: bool,
     pub timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct Zoom {
+    pub scroll_step: f64,
+    pub flashlight_radius: f64,
+}
+
+impl Default for Zoom {
+    fn default() -> Self {
+        Self {
+            scroll_step: 1.15,
+            flashlight_radius: 180.0,
+        }
+    }
 }
 
 impl Default for Preview {
@@ -98,6 +115,12 @@ pub fn parse(text: &str) -> Result<(Config, Vec<String>)> {
     if config.preview.timeout_secs == 0 {
         bail!("preview.timeout_secs must be at least 1");
     }
+    if config.zoom.scroll_step <= 1.0 {
+        bail!("zoom.scroll_step must be greater than 1");
+    }
+    if !(20.0..=2000.0).contains(&config.zoom.flashlight_radius) {
+        bail!("zoom.flashlight_radius must be between 20 and 2000");
+    }
     Ok((config, unknown))
 }
 
@@ -134,10 +157,13 @@ mod tests {
 
     #[test]
     fn unknown_keys_are_reported_not_rejected() {
-        let text = "[zoom]\nscroll_step = 1.15\n\n[save]\nfolder = \"x\"\n";
+        let text = "[editor]\nbackend = \"satty\"\n\n[save]\nfolder = \"x\"\n";
         let (config, unknown) = parse(text).unwrap();
         assert_eq!(config, Config::default());
-        assert_eq!(unknown, vec!["save.folder".to_string(), "zoom".to_string()]);
+        assert_eq!(
+            unknown,
+            vec!["editor".to_string(), "save.folder".to_string()]
+        );
     }
 
     #[test]
@@ -170,6 +196,28 @@ mod tests {
         let err = parse("[preview]\ntimeout_secs = 0\n").unwrap_err();
         assert_eq!(err.to_string(), "preview.timeout_secs must be at least 1");
         assert!(parse("[preview]\ntimeout_secs = -3\n").is_err());
+    }
+
+    #[test]
+    fn zoom_defaults_overrides_and_bounds() {
+        assert_eq!(
+            Config::default().zoom,
+            Zoom {
+                scroll_step: 1.15,
+                flashlight_radius: 180.0
+            }
+        );
+        let (config, unknown) = parse("[zoom]\nscroll_step = 1.3\n").unwrap();
+        assert!(unknown.is_empty());
+        assert_eq!(config.zoom.scroll_step, 1.3);
+        assert_eq!(config.zoom.flashlight_radius, 180.0);
+        let err = parse("[zoom]\nscroll_step = 1.0\n").unwrap_err();
+        assert_eq!(err.to_string(), "zoom.scroll_step must be greater than 1");
+        let err = parse("[zoom]\nflashlight_radius = 5.0\n").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "zoom.flashlight_radius must be between 20 and 2000"
+        );
     }
 
     #[test]
