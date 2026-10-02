@@ -56,6 +56,14 @@ pub enum AfterDrag {
     SlideOut,
 }
 
+/// During a real drag the compositor owns the pointer and the origin gets
+/// no button events. A release that reaches the dragged thumbnail means the
+/// compositor never took the drag over (e.g. a flick released before the
+/// drag started), so valw has to end it itself.
+pub fn release_ends_drag(dragged: Option<u64>, released_on: u64) -> bool {
+    dragged == Some(released_on)
+}
+
 /// `expired`: the thumbnail's timer fired while it was being dragged.
 pub fn after_drag(outcome: Outcome, expired: bool) -> AfterDrag {
     match (outcome, expired) {
@@ -140,6 +148,13 @@ mod tests {
     #[test]
     fn unknown_mime_is_an_error() {
         assert!(through_pipe("text/html", Path::new("/tmp/a.png")).is_err());
+    }
+
+    #[test]
+    fn a_release_on_the_dragged_thumbnail_ends_the_drag() {
+        assert!(release_ends_drag(Some(3), 3));
+        assert!(!release_ends_drag(Some(3), 4), "another thumbnail");
+        assert!(!release_ends_drag(None, 3), "no drag going on");
     }
 
     #[test]

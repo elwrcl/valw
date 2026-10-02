@@ -302,6 +302,10 @@ impl Host {
         let Some(drag) = self.drag.take_if(|d| d.source.inner() == source) else {
             return;
         };
+        self.finish_drag(drag, outcome, qh);
+    }
+
+    fn finish_drag(&mut self, drag: Drag, outcome: Outcome, qh: &QueueHandle<State>) {
         tracing::info!("drag-out {outcome:?}");
         drag.icon_viewport.destroy();
         drag.icon.destroy();
@@ -361,6 +365,13 @@ pub fn pointer(state: &mut State, events: &[PointerEvent], qh: &QueueHandle<Stat
             PointerEventKind::Release {
                 button: BTN_LEFT, ..
             } => {
+                let dragged = host.drag.as_ref().map(|d| d.thumb);
+                if dnd::release_ends_drag(dragged, host.thumbs[i].id) {
+                    tracing::info!("the compositor never took the drag over");
+                    let drag = host.drag.take().expect("checked above");
+                    host.finish_drag(drag, Outcome::Cancelled, qh);
+                    continue;
+                }
                 let t = &mut host.thumbs[i];
                 if t.release(x, y, qh) == Some(Action::OpenEditor) {
                     open_editor(&t.path);
