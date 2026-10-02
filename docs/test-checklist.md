@@ -76,3 +76,15 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - With Caps Lock on, `c`, `f` and `q` are ignored.
 - The libglvnd `LD_LIBRARY_PATH` reaches Satty and the clipboard child; the dev shell has no libglvnd (zoom/doctor warn under `cargo run`).
 - `valw doctor` shows only the EGL vendor; a software (llvmpipe) fallback would look fine. Report GL_RENDERER.
+
+## Editor (Phase 5a)
+
+- [ ] Clicking a preview opens `valw edit` (title `<name> — valw`); `[editor] backend = "satty"` still opens Satty.
+- [ ] Each tool draws (arrow head at the release point, outline rectangle/ellipse, line, pen dot on a click, translucent highlighter); Shift snaps lines to 45° and makes squares/circles.
+- [ ] Colours and S/M/L change new shapes only; A/R/O/L/P/H switch tools.
+- [ ] Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y and the toolbar buttons undo and redo.
+- [ ] Ctrl+S overwrites the file (the preview's file shows the edits); Ctrl+Shift+S writes `… edited.png`; "Saved" appears for 2 s.
+- [ ] The saved PNG matches the canvas (same positions and widths), also for a window shot with transparent corners.
+- [ ] Ctrl+C then Esc: the edited image is still pasteable afterwards.
+- [ ] Esc with unsaved changes shows the bar; Esc again discards; Ctrl+S in the bar saves and closes. Closing the window with Mod+Q behaves the same.
+- [ ] A large (1920×1080) shot fits the window; a small one isn't blown up; the window can be resized.
