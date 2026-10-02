@@ -62,3 +62,17 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - [ ] `c` at some zoom → the saved image is exactly the visible area at native resolution; preview and clipboard as usual.
 - [ ] On the 1366×768 laptop panel and the 1920×1080 monitor; stays smooth (no stutter) on the HD 4000.
 - [ ] `[zoom] scroll_step` / `flashlight_radius` in the config take effect; `valw doctor` shows the EGL line.
+
+### Known minors (deferred from the zoom review)
+
+- `c` during a zoom animation captures where the view is heading, not what is on screen.
+- The crop can include an edge column/row that was never shown; use the shader's exact texel bounds.
+- Panning during a zoom animation jumps; pan both the shown and target view.
+- A cancelled pointer grab (no Release, only Leave) leaves panning on; clear it on Leave.
+- The first frame of each animation uses dt = 0 (one frame of extra latency).
+- libEGL is unloaded when the renderer drops; keep it loaded for the whole process.
+- A panic during zoom frees the Wayland display before EGL is torn down (segfault instead of the panic message).
+- `zoom.scroll_step = nan` passes validation.
+- With Caps Lock on, `c`, `f` and `q` are ignored.
+- The libglvnd `LD_LIBRARY_PATH` reaches Satty and the clipboard child; the dev shell has no libglvnd (zoom/doctor warn under `cargo run`).
+- `valw doctor` shows only the EGL vendor; a software (llvmpipe) fallback would look fine. Report GL_RENDERER.
