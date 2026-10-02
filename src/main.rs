@@ -104,6 +104,26 @@ struct Common {
     /// Don't show the preview thumbnail.
     #[arg(long)]
     no_preview: bool,
+    /// The toolbar's choices: unlike the flags they can also turn off what
+    /// the config turns on. Never set from the command line.
+    #[arg(skip)]
+    toolbar_cursor: Option<bool>,
+    #[arg(skip)]
+    toolbar_preview: Option<bool>,
+}
+
+/// Whether the cursor goes into the shot.
+fn wants_cursor(common: &Common, config: &Config) -> bool {
+    common
+        .toolbar_cursor
+        .unwrap_or(common.cursor || config.capture.show_cursor)
+}
+
+/// Whether the preview thumbnail is shown.
+fn wants_preview(common: &Common, config: &Config) -> bool {
+    common
+        .toolbar_preview
+        .unwrap_or(config.preview.enabled && !common.no_preview)
 }
 
 fn parse_delay(s: &str) -> Result<Duration, String> {
@@ -176,7 +196,8 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
     if let Some(delay) = common.delay {
         std::thread::sleep(delay);
     }
-    let cursor = common.cursor || config.capture.show_cursor;
+    let cursor = wants_cursor(&common, &config);
+    let preview = wants_preview(&common, &config);
     let mut wl = Wayland::connect()?;
     if let Ok(version) = niri::version() {
         tracing::info!("niri {version}");
@@ -235,8 +256,7 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
 
     let target = Target::from_args(common.output, common.clipboard_only);
     let (pngs, saved) = save(&shots, clip, &target, &config)?;
-    if config.preview.enabled
-        && !common.no_preview
+    if preview
         && let Some(file) = saved
         && let Err(e) = hide.add(&ipc::socket_path(), &file, &source, ipc::start_host)
     {
@@ -276,8 +296,10 @@ fn from_toolbar(pick: toolbar::Picked) -> (Mode, Common) {
         clipboard_only: false,
         output: None,
         delay: None,
-        cursor: pick.cursor,
-        no_preview: !pick.preview,
+        cursor: false,
+        no_preview: false,
+        toolbar_cursor: Some(pick.cursor),
+        toolbar_preview: Some(pick.preview),
     };
     (mode, common)
 }
@@ -391,7 +413,10 @@ mod tests {
         };
         let (mode, common) = from_toolbar(pick(T::Screen, true, false));
         assert!(matches!(mode, Mode::Screen { all: false }));
-        assert!(common.cursor && common.no_preview);
+        assert_eq!(
+            (common.toolbar_cursor, common.toolbar_preview),
+            (Some(true), Some(false))
+        );
         assert!(matches!(
             from_toolbar(pick(T::Window, false, true)).0,
             Mode::Window
@@ -402,12 +427,66 @@ mod tests {
         ));
         let (mode, common) = from_toolbar(pick(T::Zoom, false, true));
         assert!(matches!(mode, Mode::Zoom));
-        assert!(
-            !common.cursor
-                && !common.no_preview
-                && common.delay.is_none()
-                && common.output.is_none()
+        assert_eq!(
+            (common.toolbar_cursor, common.toolbar_preview),
+            (Some(false), Some(true))
         );
+        assert!(common.delay.is_none() && common.output.is_none());
+    }
+
+    #[test]
+    fn toolbar_options_win_over_the_config_both_ways() {
+        use toolbar::state::Mode as T;
+        let mut on = Config::default();
+        on.capture.show_cursor = true;
+        on.preview.enabled = true;
+        let mut off = Config::default();
+        off.capture.show_cursor = false;
+        off.preview.enabled = false;
+        let pick = |cursor, preview| {
+            from_toolbar(toolbar::Picked {
+                mode: T::Screen,
+                cursor,
+                preview,
+            })
+            .1
+        };
+        assert!(
+            !wants_cursor(&pick(false, false), &on),
+            "unticked beats the config"
+        );
+        assert!(!wants_preview(&pick(false, false), &on));
+        assert!(
+            wants_cursor(&pick(true, true), &off),
+            "ticked beats the config"
+        );
+        assert!(wants_preview(&pick(true, true), &off));
+    }
+
+    #[test]
+    fn the_command_line_still_follows_the_config() {
+        let cli = |args: &[&str]| match Cli::try_parse_from(
+            std::iter::once("valw").chain(args.iter().copied()),
+        )
+        .unwrap()
+        .command
+        {
+            Command::Screen { common, .. } => common,
+            _ => unreachable!(),
+        };
+        let mut on = Config::default();
+        on.capture.show_cursor = true;
+        assert!(wants_cursor(&cli(&["screen"]), &on));
+        assert!(wants_cursor(
+            &cli(&["screen", "--cursor"]),
+            &Config::default()
+        ));
+        assert!(!wants_cursor(&cli(&["screen"]), &Config::default()));
+        assert!(wants_preview(&cli(&["screen"]), &Config::default()));
+        assert!(!wants_preview(
+            &cli(&["screen", "--no-preview"]),
+            &Config::default()
+        ));
     }
 
     #[test]
