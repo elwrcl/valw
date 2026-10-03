@@ -153,3 +153,10 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - Without `XDG_RUNTIME_DIR` the sound cache and combo state in `/tmp` are shared between users.
 - `pipewire` on the wrapper's PATH adds its whole closure to the package.
 - Tuning by ear: shots 6–7 are about 9–10 dB louder than 1–5; adjust with `__combo-demo`.
+
+## home-manager module
+
+- [ ] copland: `home-valw.ulu.nix` uses `inputs.valw.homeModules.default` with `programs.valw.enable = true` and a few `settings`; rebuild; `~/.config/valw/config.toml` is the store file with those settings.
+- [ ] A typo in `settings` (e.g. `preview.timout_secs`) fails the rebuild naming the key.
+- [ ] The toolbar still remembers its options (state file stays writable).
+- [ ] New binds for `valw window`, `valw zoom`, `valw toolbar` in copland's niri keybinds.
