@@ -160,3 +160,11 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - [ ] A typo in `settings` (e.g. `preview.timout_secs`) fails the rebuild naming the key.
 - [ ] The toolbar still remembers its options (state file stays writable).
 - [ ] New binds for `valw window`, `valw zoom`, `valw toolbar` in copland's niri keybinds.
+
+### Known minors (deferred from the home-manager review)
+
+- Cross-compiled home configurations can't run the build-time check; skip it when the build platform can't run the host binary.
+- The check derivation may be sent to remote builders (no `preferLocalBuild`).
+- The README's module example assumes `inputs` is passed to home-manager modules.
+- The source filter drops any `docs` or `README.md` at any depth, not just the root ones.
+- The README's niri binds clash with niri's default `Print` bind if pasted next to it.
