@@ -1,7 +1,12 @@
 { ... }:
 {
   perSystem =
-    { pkgs, lib, self', ... }:
+    {
+      pkgs,
+      lib,
+      self',
+      ...
+    }:
     {
       devShells.default = pkgs.mkShell {
         inputsFrom = [ self'.packages.default ];

@@ -16,6 +16,9 @@
               ".jj"
               # Plan ledgers and review notes; not part of the build.
               ".superpowers"
+              # Documentation: a doc change shouldn't rebuild the binary.
+              "docs"
+              "README.md"
               "result"
               "target"
             ]);

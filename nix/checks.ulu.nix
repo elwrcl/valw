@@ -1,9 +1,44 @@
-{ ... }:
+{ self, ... }:
 {
   perSystem =
-    { pkgs, self', ... }:
+    {
+      pkgs,
+      lib,
+      self',
+      ...
+    }:
     let
       valw = self'.packages.default;
+
+      # The home-manager module, evaluated with stand-ins for the two
+      # home-manager options it sets (no home-manager input needed).
+      homeModule =
+        settings:
+        (lib.evalModules {
+          modules = [
+            self.homeModules.default
+            (
+              { lib, ... }:
+              {
+                options.home.packages = lib.mkOption {
+                  type = lib.types.listOf lib.types.package;
+                  default = [ ];
+                };
+                options.xdg.configFile = lib.mkOption {
+                  type = lib.types.attrsOf (
+                    lib.types.submodule { options.source = lib.mkOption { type = lib.types.path; }; }
+                  );
+                  default = { };
+                };
+                config._module.args.pkgs = pkgs;
+                config.programs.valw = {
+                  enable = true;
+                  inherit settings;
+                };
+              }
+            )
+          ];
+        }).config;
 
       # Reuses the package's vendored dependencies, runs `cmd` instead of the build.
       cargoCheck =
@@ -19,6 +54,35 @@
     in
     {
       checks = {
+        home-module =
+          let
+            plain = homeModule { };
+            set = homeModule {
+              preview.timeout_secs = 3;
+              sound.volume = 0.4;
+            };
+          in
+          assert lib.assertMsg (plain.home.packages == [ valw ]) "the module installs valw";
+          assert lib.assertMsg (plain.xdg.configFile == { }) "no settings, no config file";
+          pkgs.runCommand "valw-home-module" { } ''
+            grep -qx 'timeout_secs = 3' ${set.xdg.configFile."valw/config.toml".source}
+            grep -qx 'volume = 0.4' ${set.xdg.configFile."valw/config.toml".source}
+            touch $out
+          '';
+
+        home-module-rejects =
+          let
+            fails =
+              settings:
+              pkgs.testers.testBuildFailure (homeModule settings).xdg.configFile."valw/config.toml".source;
+          in
+          pkgs.runCommand "valw-home-module-rejects" { } ''
+            grep -q 'sound.volume must be between 0 and 1' ${fails { sound.volume = 2; }}/testBuildFailure.log
+            grep -q 'unknown config key: preview.timout_secs' ${
+              fails { preview.timout_secs = 3; }
+            }/testBuildFailure.log
+            touch $out
+          '';
         clippy = cargoCheck "clippy" [ pkgs.clippy ] "cargo clippy --all-targets --offline -- -D warnings";
         nextest = cargoCheck "nextest" [ pkgs.cargo-nextest ] "cargo nextest run --offline";
 
