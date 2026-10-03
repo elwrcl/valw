@@ -9,7 +9,7 @@ use wayland_client::{Connection, Proxy, protocol::wl_surface::WlSurface};
 use super::view::View;
 use crate::frame::Bgrx;
 
-type Egl = egl::DynamicInstance<egl::EGL1_5>;
+pub(crate) type Egl = egl::DynamicInstance<egl::EGL1_5>;
 
 /// `EGL_PLATFORM_WAYLAND_KHR`.
 const PLATFORM_WAYLAND: egl::Enum = 0x31D8;
@@ -47,7 +47,7 @@ void main() {
 ";
 
 /// Loads libEGL and opens the compositor's EGL display.
-fn open(conn: &Connection) -> Result<(Egl, egl::Display)> {
+pub(crate) fn open(conn: &Connection) -> Result<(Egl, egl::Display)> {
     let lib =
         unsafe { libloading::Library::new("libEGL.so.1") }.context("could not load libEGL.so.1")?;
     let egl = unsafe { Egl::load_required_from(lib) }
@@ -65,7 +65,7 @@ fn open(conn: &Connection) -> Result<(Egl, egl::Display)> {
     Ok((egl, display))
 }
 
-fn config(egl: &Egl, display: egl::Display) -> Result<egl::Config> {
+pub(crate) fn config(egl: &Egl, display: egl::Display) -> Result<egl::Config> {
     #[rustfmt::skip]
     let attributes = [
         egl::SURFACE_TYPE, egl::WINDOW_BIT,

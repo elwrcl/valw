@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 
 use image::RgbaImage;
 
+pub mod gl;
+
 /// Three colours, dark to light, as linear 0–1 RGB.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
