@@ -107,6 +107,26 @@ pub fn is_our_capture(event: &Event, path: &Path) -> bool {
     matches!(event, Event::ScreenshotCaptured { path: Some(p) } if Path::new(p) == path)
 }
 
+/// Every window niri has.
+#[allow(dead_code)] // the picker (theme plan Task 6) removes this
+pub fn windows() -> Result<Vec<Window>> {
+    match request(Request::Windows)? {
+        Response::Windows(windows) => Ok(windows),
+        other => Err(anyhow!("unexpected niri reply: {other:?}")),
+    }
+}
+
+/// `windows` most recently used first: the focused one, then by focus
+/// time, then those never focused, by id.
+#[allow(dead_code)] // the picker (theme plan Task 6) removes this
+pub fn mru(mut windows: Vec<Window>) -> Vec<Window> {
+    windows.sort_by_key(|w| {
+        let at = w.focus_timestamp.map(|t| (t.secs, t.nanos));
+        (!w.is_focused, std::cmp::Reverse(at), w.id)
+    });
+    windows
+}
+
 /// The output showing the workspace a window is on, if niri knows it.
 pub fn output_of(workspace_id: Option<u64>, workspaces: &[Workspace]) -> Option<String> {
     let id = workspace_id?;
@@ -131,6 +151,42 @@ pub fn parse_version(v: &str) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn window(id: u64, focused: bool, at: Option<u64>) -> Window {
+        Window {
+            id,
+            title: None,
+            app_id: None,
+            pid: None,
+            workspace_id: None,
+            is_focused: focused,
+            is_floating: false,
+            is_urgent: false,
+            layout: niri_ipc::WindowLayout {
+                pos_in_scrolling_layout: None,
+                tile_size: (0.0, 0.0),
+                window_size: (0, 0),
+                tile_pos_in_workspace_view: None,
+                window_offset_in_tile: (0.0, 0.0),
+            },
+            focus_timestamp: at.map(|secs| niri_ipc::Timestamp { secs, nanos: 0 }),
+        }
+    }
+
+    #[test]
+    fn most_recently_used_first() {
+        let order: Vec<u64> = mru(vec![
+            window(1, false, Some(10)),
+            window(2, false, None),
+            window(3, true, Some(5)),
+            window(4, false, Some(20)),
+            window(5, false, None),
+        ])
+        .iter()
+        .map(|w| w.id)
+        .collect();
+        assert_eq!(order, [3, 4, 1, 2, 5]);
+    }
 
     fn ws(id: u64, output: Option<&str>) -> Workspace {
         Workspace {

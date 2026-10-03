@@ -13,6 +13,9 @@ mod lock;
 mod log;
 mod niri;
 mod output;
+// The picker lands in pieces; Task 6 of the theme plan removes this.
+#[allow(dead_code)]
+mod picker;
 mod region;
 mod render;
 mod selection;

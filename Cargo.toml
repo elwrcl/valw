@@ -16,6 +16,7 @@ image = { version = "0.25.10", default-features = false, features = ["png"] }
 khronos-egl = { version = "6.0.0", features = ["dynamic"] }
 libc = "0.2.189"
 libloading = "0.8"
+resvg = "0.48.1"
 niri-ipc = "=26.4.0"
 rustix = { version = "1.1.5", features = ["event", "fs", "pipe", "process", "stdio"] }
 serde = { version = "1.0.229", features = ["derive"] }
