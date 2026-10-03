@@ -21,8 +21,8 @@ use wayland_client::{
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 
 use crate::lock::Lock;
-use crate::theme::Palette;
 use crate::theme::gl::{Frame, Paint};
+use crate::theme::{Pacer, Palette, Step};
 use crate::wayland::{State, Wayland};
 
 pub const NAMESPACE: &str = "valw-backdrop";
@@ -75,8 +75,7 @@ struct Surface {
     changed: Instant,
     /// A wallpaper palette being worked out on a thread.
     incoming: Option<mpsc::Receiver<Option<Palette>>>,
-    /// Frame callbacks since the last draw.
-    skipped: u32,
+    pacer: Pacer,
 }
 
 #[derive(Default)]
@@ -143,7 +142,7 @@ pub fn add(state: &mut State, qh: &QueueHandle<State>, output: &WlOutput) {
             to: palette,
             changed: now,
             incoming: None,
-            skipped: 0,
+            pacer: Pacer::new(DRAW_EVERY),
         });
     }
 }
@@ -193,27 +192,24 @@ impl Backdrop {
                 }
             },
         }
-        s.draw(qh);
+        let step = s.pacer.configure();
+        s.step(step, qh);
     }
 
     pub fn frame_done(&mut self, surface: &WlSurface, qh: &QueueHandle<State>) {
         if let Some(i) = self.index(surface) {
-            self.surfaces[i].draw(qh);
+            let s = &mut self.surfaces[i];
+            let step = s.pacer.frame();
+            s.step(step, qh);
         }
     }
 }
 
 impl Surface {
-    fn draw(&mut self, qh: &QueueHandle<State>) {
-        // Between draws, only ask for the next frame (an empty commit).
-        self.skipped += 1;
-        if self.skipped < DRAW_EVERY && self.last_frame.is_some() {
-            let surface = self.layer.wl_surface();
-            surface.frame(qh, FrameCallbackData(surface.clone()));
-            surface.commit();
-            return;
-        }
-        self.skipped = 0;
+    /// Every configure and frame callback: notice a pause (the overview was
+    /// closed) and pick up a new wallpaper palette, then draw or wait as
+    /// the pacer says.
+    fn step(&mut self, step: Step, qh: &QueueHandle<State>) {
         let now = Instant::now();
         if should_refresh(self.last_frame, now) && self.incoming.is_none() {
             let (tx, rx) = mpsc::channel();
@@ -237,21 +233,31 @@ impl Surface {
             }
             self.incoming = None;
         }
+        // Every callback counts, drawn or not: skipped frames are not a pause.
         self.last_frame = Some(now);
-        let Some(paint) = &self.paint else {
-            return;
-        };
         let surface = self.layer.wl_surface();
-        surface.frame(qh, FrameCallbackData(surface.clone()));
-        let frame = Frame {
-            time: (now - self.start).as_secs_f32(),
-            motion: 0.0,
-            speed: SPEED,
-            scale: 1.0,
-            palette: ease(&self.from, &self.to, now - self.changed),
-        };
-        if let Err(e) = paint.draw(&frame) {
-            tracing::warn!("backdrop on {}: {e:#}", self.name);
+        match step {
+            Step::Idle => {}
+            Step::Wait => {
+                surface.frame(qh, FrameCallbackData(surface.clone()));
+                surface.commit();
+            }
+            Step::Draw => {
+                let Some(paint) = &self.paint else {
+                    return;
+                };
+                surface.frame(qh, FrameCallbackData(surface.clone()));
+                let frame = Frame {
+                    time: (now - self.start).as_secs_f32(),
+                    motion: 0.0,
+                    speed: SPEED,
+                    scale: 1.0,
+                    palette: ease(&self.from, &self.to, now - self.changed),
+                };
+                if let Err(e) = paint.draw(&frame) {
+                    tracing::warn!("backdrop on {}: {e:#}", self.name);
+                }
+            }
         }
     }
 }

@@ -32,8 +32,8 @@ use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use self::layout::Rect;
 use crate::editor::text;
 use crate::error::{Cancelled, HintExt};
-use crate::theme::Palette;
 use crate::theme::gl::{Frame, Paint};
+use crate::theme::{Pacer, Palette, Step};
 use crate::wayland::{Output, State, Wayland};
 
 pub const NAMESPACE: &str = "valw-picker";
@@ -65,6 +65,8 @@ pub struct Picker {
     from: Palette,
     changed: Instant,
     overlay_dirty: bool,
+    /// One frame-callback chain, however often the surface is configured.
+    pacer: Pacer,
     shift: bool,
     outcome: Option<Option<usize>>,
     error: Option<anyhow::Error>,
@@ -136,6 +138,7 @@ pub fn run(wl: &mut Wayland, output: &Output) -> Result<Window> {
         from: first,
         changed: now,
         overlay_dirty: true,
+        pacer: Pacer::new(1),
         shift: false,
         outcome: None,
         error: None,
@@ -223,7 +226,9 @@ impl Picker {
             },
         }
         self.overlay_dirty = true;
-        self.draw(qh);
+        if self.pacer.configure() == Step::Draw {
+            self.draw(qh);
+        }
     }
 
     pub fn closed(&mut self, layer: &LayerSurface) {
@@ -234,7 +239,7 @@ impl Picker {
     }
 
     pub fn frame_done(&mut self, surface: &WlSurface, qh: &QueueHandle<State>) {
-        if self.is(surface) {
+        if self.is(surface) && self.pacer.frame() == Step::Draw {
             self.draw(qh);
         }
     }

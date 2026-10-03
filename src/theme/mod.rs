@@ -9,7 +9,7 @@ use image::RgbaImage;
 
 pub mod gl;
 
-/// Three colours, dark to light, as linear 0–1 RGB.
+/// Three colours, dark to light, as 0–1 sRGB.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
     pub base: [f32; 3],
@@ -37,7 +37,7 @@ impl Palette {
 
 pub fn hex(s: &str) -> Option<[f32; 3]> {
     let s = s.trim().trim_start_matches('#');
-    if s.len() != 6 {
+    if s.len() != 6 || !s.is_ascii() {
         return None;
     }
     let v = |i: usize| {
@@ -46,6 +46,59 @@ pub fn hex(s: &str) -> Option<[f32; 3]> {
             .map(|v| v as f32 / 255.0)
     };
     Some([v(0)?, v(2)?, v(4)?])
+}
+
+/// What an animated surface does on a configure or a frame callback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// Draw (and ask for the next frame).
+    Draw,
+    /// Only ask for the next frame (an empty commit).
+    Wait,
+    /// Nothing: a frame is already on its way.
+    Idle,
+}
+
+/// Frame-callback pacing for an animated surface: exactly one chain of
+/// callbacks, however often the surface is configured, drawing on every
+/// `every`-th callback.
+#[derive(Debug, Clone)]
+pub struct Pacer {
+    every: u32,
+    count: u32,
+    running: bool,
+}
+
+impl Pacer {
+    pub fn new(every: u32) -> Pacer {
+        Pacer {
+            every: every.max(1),
+            count: 0,
+            running: false,
+        }
+    }
+
+    /// A configure: draw now, unless the chain already runs.
+    pub fn configure(&mut self) -> Step {
+        if self.running {
+            Step::Idle
+        } else {
+            self.running = true;
+            self.count = 0;
+            Step::Draw
+        }
+    }
+
+    /// A frame callback arrived.
+    pub fn frame(&mut self) -> Step {
+        self.count += 1;
+        if self.count >= self.every {
+            self.count = 0;
+            Step::Draw
+        } else {
+            Step::Wait
+        }
+    }
 }
 
 /// A Noctalia community palette file at `mode`.
@@ -271,6 +324,34 @@ mod tests {
             "no source"
         );
         assert_eq!(theme_choice("not toml ["), None);
+    }
+
+    #[test]
+    fn hex_rejects_non_ascii_without_panicking() {
+        assert_eq!(hex("aé€"), None);
+        assert_eq!(hex("#ééé"), None);
+    }
+
+    #[test]
+    fn one_frame_chain_per_surface() {
+        let mut p = Pacer::new(2);
+        assert_eq!(
+            p.configure(),
+            Step::Draw,
+            "first configure starts the chain"
+        );
+        assert_eq!(
+            p.configure(),
+            Step::Idle,
+            "a reconfigure doesn't start a second one"
+        );
+        assert_eq!(p.frame(), Step::Wait);
+        assert_eq!(p.frame(), Step::Draw);
+        assert_eq!(p.frame(), Step::Wait);
+        let mut every = Pacer::new(1);
+        every.configure();
+        assert_eq!(every.frame(), Step::Draw);
+        assert_eq!(every.frame(), Step::Draw);
     }
 
     #[test]
