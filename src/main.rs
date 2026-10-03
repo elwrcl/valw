@@ -18,7 +18,7 @@ mod selection;
 mod shadow;
 mod sound;
 mod stack;
-// The theme lands in pieces; Task 2 of the theme plan removes this.
+// Parts of the theme are used from Task 4 of the theme plan on; that task removes this.
 #[allow(dead_code)]
 mod theme;
 mod thumbnail;

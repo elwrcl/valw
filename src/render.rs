@@ -1,19 +1,25 @@
 use crate::frame::PixelRect;
 
-/// Overlay brightness outside the selection (60%, i.e. darkened by 40%).
-pub const DIM: u8 = 153;
+/// How far the overlay outside the selection leans towards the theme colour.
+pub const TINT: f32 = 0.55;
 
-/// B, G, R, X pixels with every byte scaled by about `brightness / 255`.
-///
-/// This runs on every output before the overlay can appear, so it is one
-/// branch-free pass the compiler can vectorise. Scaling X too is harmless:
-/// the overlay buffer is XRGB8888, which ignores it.
-pub fn dim(pixels: &[u8], brightness: u8) -> Vec<u8> {
-    let factor = brightness as u16 + 1;
-    pixels
-        .iter()
-        .map(|&b| ((b as u16 * factor) >> 8) as u8)
-        .collect()
+/// B, G, R, X pixels blended `amount` of the way towards `colour` (RGB 0–1).
+/// Runs once per output before the overlay shows: a lookup table per
+/// channel keeps it as cheap as the old integer dim.
+pub fn tint(pixels: &[u8], colour: [f32; 3], amount: f32) -> Vec<u8> {
+    let keep = 1.0 - amount;
+    let table = |c: f32| -> [u8; 256] {
+        std::array::from_fn(|v| (v as f32 * keep + c * 255.0 * amount).round() as u8)
+    };
+    let [r, g, b] = colour;
+    let tables = [table(b), table(g), table(r)];
+    let mut out = pixels.to_vec();
+    for px in out.as_chunks_mut::<4>().0 {
+        for (v, t) in px.iter_mut().zip(&tables) {
+            *v = t[*v as usize];
+        }
+    }
+    out
 }
 
 /// Draws one overlay frame into `dst`: `dark` everywhere, `bright` inside
@@ -92,16 +98,19 @@ pub fn blend(dst: &mut [u8], dst_width: u32, src: &tiny_skia::Pixmap, at: (u32, 
 mod tests {
     use super::*;
 
-    #[test]
-    fn dims_every_byte() {
-        assert_eq!(dim(&[200, 100, 50, 0], 255), vec![200, 100, 50, 0]);
-        assert_eq!(dim(&[200, 100, 50, 255], DIM), vec![120, 60, 30, 153]);
-        assert_eq!(dim(&[255, 0, 1, 2], 0), vec![0, 0, 0, 0]);
-    }
-
     fn px(buf: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
         let i = ((y * width + x) * 4) as usize;
         buf[i..i + 4].try_into().unwrap()
+    }
+
+    #[test]
+    fn tint_blends_towards_the_colour() {
+        // B, G, R, X = 200, 100, 0, 255; colour pure red (R = 1).
+        let out = tint(&[200, 100, 0, 255], [1.0, 0.0, 0.0], 0.55);
+        assert_eq!(out[0], (200.0 * 0.45f32).round() as u8, "blue fades");
+        assert_eq!(out[1], (100.0 * 0.45f32).round() as u8);
+        assert_eq!(out[2], (255.0 * 0.55f32).round() as u8, "red rises");
+        assert_eq!(tint(&[10, 20, 30, 0], [0.0; 3], 0.0), vec![10, 20, 30, 0]);
     }
 
     #[test]

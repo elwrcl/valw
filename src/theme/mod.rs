@@ -150,19 +150,39 @@ pub fn current() -> Palette {
 }
 
 fn noctalia_palette() -> Option<Palette> {
-    let scheme = noctalia(&["color-scheme-get"])?; // "<source> <name>"
-    let (source, name) = scheme.split_once(' ')?;
+    // Noctalia keeps the live choice in its state settings (theme-mode-set
+    // writes there); its config holds the initial one. Reading the files is
+    // instant, unlike `noctalia msg`, and this runs before every overlay.
+    let state = state_dir().join("noctalia/settings.toml");
+    let config = crate::config::home().join(".config/noctalia/config.toml");
+    let (source, name, mode) = [state, config]
+        .iter()
+        .find_map(|p| theme_choice(&std::fs::read_to_string(p).ok()?))?;
     if source != "community" {
         return None;
     }
-    let mode = noctalia(&["theme-mode-get"])?;
-    let dir = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| crate::config::home().join(".local/state"));
-    let file = dir
+    let file = state_dir()
         .join("noctalia/community-palettes")
         .join(format!("{}.json", name.replace(' ', "%20")));
     from_noctalia_file(&std::fs::read_to_string(file).ok()?, &mode)
+}
+
+fn state_dir() -> PathBuf {
+    std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| crate::config::home().join(".local/state"))
+}
+
+/// `(source, community palette, mode)` from a Noctalia settings file.
+fn theme_choice(text: &str) -> Option<(String, String, String)> {
+    let doc: toml::Table = text.parse().ok()?;
+    let theme = doc.get("theme")?.as_table()?;
+    let get = |k: &str| theme.get(k)?.as_str().map(str::to_string);
+    Some((
+        get("source")?,
+        get("community_palette").unwrap_or_default(),
+        get("mode").unwrap_or_else(|| "dark".into()),
+    ))
 }
 
 /// The wallpaper Noctalia shows on `connector`.
@@ -234,6 +254,21 @@ mod tests {
         for c in [p.base, p.body, p.highlight] {
             assert!(c[2] > c[0], "blue family, not grey or black: {p:?}");
         }
+    }
+
+    #[test]
+    fn theme_choice_from_settings() {
+        let text = "[bar]\nx = 1\n\n[theme]\ncommunity_palette = \"Kemuri Susu\"\nmode = \"dark\"\nsource = \"community\"\n\n[wallpaper]\n";
+        assert_eq!(
+            theme_choice(text),
+            Some(("community".into(), "Kemuri Susu".into(), "dark".into()))
+        );
+        assert_eq!(
+            theme_choice("[theme]\nmode = \"dark\"\n"),
+            None,
+            "no source"
+        );
+        assert_eq!(theme_choice("not toml ["), None);
     }
 
     #[test]

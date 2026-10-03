@@ -87,6 +87,8 @@ pub fn select(wl: &mut Wayland, outputs: &[Output], frames: &[Frame]) -> Result<
         .context("compositor does not support wp-viewporter")
         .hint("run `valw doctor` to see what the compositor supports")?;
 
+    // The theme's colour for the overlay outside the selection.
+    let palette = crate::theme::current();
     let mut surfaces = Vec::new();
     for (output, frame) in outputs.iter().zip(frames) {
         let surface = s.compositor.create_surface(&qh);
@@ -102,7 +104,7 @@ pub fn select(wl: &mut Wayland, outputs: &[Output], frames: &[Frame]) -> Result<
         layer.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
         layer.commit();
         let viewport = viewporter.get_viewport(layer.wl_surface(), &qh, ());
-        surfaces.push(Surface::new(layer, viewport, frame, &s.shm)?);
+        surfaces.push(Surface::new(layer, viewport, frame, &palette, &s.shm)?);
     }
 
     tracing::debug!(
@@ -126,7 +128,13 @@ pub fn select(wl: &mut Wayland, outputs: &[Output], frames: &[Frame]) -> Result<
 }
 
 impl Surface {
-    fn new(layer: LayerSurface, viewport: WpViewport, frame: &Frame, shm: &Shm) -> Result<Surface> {
+    fn new(
+        layer: LayerSurface,
+        viewport: WpViewport,
+        frame: &Frame,
+        palette: &crate::theme::Palette,
+        shm: &Shm,
+    ) -> Result<Surface> {
         let (width, height) = frame.pixels.dimensions();
         let len = (width * height * 4) as usize;
         Ok(Surface {
@@ -135,7 +143,7 @@ impl Surface {
             geom: frame.output.clone(),
             width,
             height,
-            dark: render::dim(frame.pixels.as_raw(), render::DIM),
+            dark: render::tint(frame.pixels.as_raw(), palette.base, render::TINT),
             bright: Arc::clone(&frame.pixels),
             // Room for two buffers so one can be on screen while we draw the next.
             pool: SlotPool::new(len * 2, shm).context("could not create shm pool")?,
