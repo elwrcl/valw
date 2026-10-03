@@ -59,14 +59,35 @@ binds {
 |---|---|
 | `valw screen [--all]` | The focused output (or every output) |
 | `valw region` | Drag a region; Shift locks an axis, Alt grows from the centre, Space moves it; Space before dragging switches to window mode |
-| `valw window` | Click a window |
+| `valw window [--pick]` | Pick a window from cards over a liquid-paint background (Tab/arrows, Enter, Esc); `--pick` clicks it on screen instead |
 | `valw zoom` | Freeze the screen and zoom: wheel, drag, `f` flashlight, `c` capture the view, `0` reset, Esc |
 | `valw toolbar` | Pick a mode from a floating bar, with a timer and options |
 | `valw edit FILE` | The markup editor (clicking a preview opens it) |
+| `valw backdrop` | Keep running: the liquid-paint background behind niri's overview (below) |
 | `valw doctor` | What the compositor and system support |
 
 Capture commands take `--clipboard-only`, `-o PATH` (`-` for stdout),
 `--delay SECS`, `--cursor` and `--no-preview`.
+
+## The overview backdrop
+
+`valw backdrop` draws a slow liquid-paint background, coloured from the
+wallpaper (via Noctalia, if it runs), behind niri's overview. It only draws
+while the overview shows it. Start it with niri and place it in the
+backdrop:
+
+```kdl
+spawn-at-startup "valw" "backdrop"
+
+layer-rule {
+    match namespace="^valw-backdrop$"
+    place-within-backdrop true
+}
+```
+
+With Noctalia, turn its own backdrop off (`[backdrop] enabled = false`).
+Colours elsewhere (the region dim, the window picker's fallback) follow
+Noctalia's current community palette when there is one.
 
 ## Configuration
 

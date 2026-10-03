@@ -168,3 +168,13 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - The README's module example assumes `inputs` is passed to home-manager modules.
 - The source filter drops any `docs` or `README.md` at any depth, not just the root ones.
 - The README's niri binds clash with niri's default `Print` bind if pasted next to it.
+
+## Theme
+
+- [ ] Region (Mod+Shift+S): the dim outside the selection takes the Noctalia theme's colour (light and dark mode), still see-through; it opens as fast as before.
+- [ ] `valw window` (Mod+Shift+W): cards for every window, most recently used first, icons right (Ghostty, Dolphin, Telegram, Spotify…), long titles ellipsised; Tab/Shift+Tab/arrows/hover move the selection; Enter or a click captures that window (shadow, sound, preview); Esc or a click outside cancels.
+- [ ] The picker's shader alternates swirl/flow per run and takes the selected window's colours, easing between cards; the picker never appears in the shot.
+- [ ] 20+ windows still fit (cards shrink); a window without an icon shows its initial.
+- [ ] Toolbar → Window opens the picker; Space in region mode still uses niri's click-a-window.
+- [ ] Overview (Mod+Tab): the paint flows slowly behind the workspaces, coloured from the current wallpaper; after the wallpaper changes, the next overview eases to the new colours; no GPU load while the overview is closed (`cat /sys/class/drm/card1/gt_act_freq_mhz` stays low).
+- [ ] Two monitors: each has its own backdrop; unplugging/replugging one keeps the other working.
