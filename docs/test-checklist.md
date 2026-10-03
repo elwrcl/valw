@@ -178,3 +178,14 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - [ ] Toolbar → Window opens the picker; Space in region mode still uses niri's click-a-window.
 - [ ] Overview (Mod+Tab): the paint flows slowly behind the workspaces, coloured from the current wallpaper; after the wallpaper changes, the next overview eases to the new colours; no GPU load while the overview is closed (`cat /sys/class/drm/card1/gt_act_freq_mhz` stays low).
 - [ ] Two monitors: each has its own backdrop; unplugging/replugging one keeps the other working.
+- [ ] Picker → Enter on the focused window of a libadwaita/GTK app: the headerbar isn't dimmed in the shot (150 ms settle).
+
+### Known minors (deferred from the theme review)
+
+- The wallpaper is decoded again on every overview open after a pause.
+- Icon lookup misses Breeze-style `apps/<size>/` layouts, relative `Icon=foo.png`, `.svgz`/`.xpm`; non-square icons aren't centred.
+- Each selection change rebuilds a full-output overlay; long titles make ellipsising slow.
+- Palette names with non-space special characters fall back to the default palette.
+- The backdrop calls every lock error "another backdrop is running"; it keeps its first scale after a scale change.
+- libEGL is unloaded when the last backdrop surface goes; a removed output leaks its viewport object.
+- Holding Tab doesn't repeat in the picker; "no windows" exits as an error instead of a cancel.
