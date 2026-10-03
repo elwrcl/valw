@@ -36,6 +36,7 @@ use wayland_protocols::wp::viewporter::client::{
 };
 use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
 
+use crate::backdrop::Backdrop;
 use crate::capture::Pending;
 use crate::dnd::Outcome;
 use crate::error::HintExt;
@@ -87,6 +88,8 @@ pub struct State {
     /// The toolbar and its countdown, while they are open.
     pub toolbar: Option<Toolbar>,
     pub pill: Option<Pill>,
+    /// `valw backdrop`'s surfaces.
+    pub backdrop: Option<Backdrop>,
     /// The preview thumbnails, in the preview host process.
     pub preview: Option<Host>,
 }
@@ -121,6 +124,7 @@ impl Wayland {
             zoom: None,
             toolbar: None,
             pill: None,
+            backdrop: None,
             preview: None,
         };
         // Two round trips: one for wl_output, one for the xdg-output details.
@@ -310,6 +314,9 @@ impl CompositorHandler for State {
         if let Some(zoom) = &mut self.zoom {
             zoom.frame_done(surface, qh);
         }
+        if let Some(backdrop) = &mut self.backdrop {
+            backdrop.frame_done(surface, qh);
+        }
         if let Some(preview) = &mut self.preview {
             preview.frame_done(surface, qh);
         }
@@ -339,11 +346,24 @@ impl OutputHandler for State {
         &mut self.outputs
     }
 
-    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn new_output(&mut self, _: &Connection, qh: &QueueHandle<Self>, output: wl_output::WlOutput) {
+        if self.backdrop.is_some() {
+            crate::backdrop::add(self, qh, &output);
+        }
+    }
 
     fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
 
-    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn output_destroyed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+    ) {
+        if let Some(backdrop) = &mut self.backdrop {
+            backdrop.remove(&output);
+        }
+    }
 }
 
 impl LayerShellHandler for State {
@@ -360,6 +380,9 @@ impl LayerShellHandler for State {
         if let Some(pill) = &mut self.pill {
             pill.closed(layer);
         }
+        if let Some(backdrop) = &mut self.backdrop {
+            backdrop.closed(layer);
+        }
         if let Some(preview) = &mut self.preview {
             preview.closed(layer);
         }
@@ -367,7 +390,7 @@ impl LayerShellHandler for State {
 
     fn configure(
         &mut self,
-        _: &Connection,
+        conn: &Connection,
         qh: &QueueHandle<Self>,
         layer: &LayerSurface,
         configure: LayerSurfaceConfigure,
@@ -384,6 +407,9 @@ impl LayerShellHandler for State {
         }
         if let Some(pill) = &mut self.pill {
             pill.configure(layer);
+        }
+        if let Some(backdrop) = &mut self.backdrop {
+            backdrop.configure(conn, layer, configure.new_size, qh);
         }
         if let Some(preview) = &mut self.preview {
             preview.configure(layer, qh);

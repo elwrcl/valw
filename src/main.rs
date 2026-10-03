@@ -1,3 +1,4 @@
+mod backdrop;
 mod capture;
 mod config;
 mod detach;
@@ -18,8 +19,6 @@ mod selection;
 mod shadow;
 mod sound;
 mod stack;
-// Parts of the theme are used from Task 4 of the theme plan on; that task removes this.
-#[allow(dead_code)]
 mod theme;
 mod thumbnail;
 mod toolbar;
@@ -82,6 +81,8 @@ enum Command {
     },
     /// Pick a mode from a floating bar (Cmd+Shift+5).
     Toolbar,
+    /// The paint shader behind niri's overview (keep it running; see the README).
+    Backdrop,
     /// Report what the compositor and system support.
     Doctor,
     /// Internal: the process that shows preview thumbnails.
@@ -198,6 +199,7 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Doctor => doctor::run(),
+        Command::Backdrop => backdrop::run(),
         Command::PreviewHost => host::run(),
         Command::Screen { all, common } => capture(Mode::Screen { all }, common),
         Command::Region { common } => capture(Mode::Region, common),
@@ -446,6 +448,7 @@ mod tests {
         assert!(!parses(&["edit"]));
         assert!(parses(&["__clipboard"]));
         assert!(parses(&["toolbar"]));
+        assert!(parses(&["backdrop"]));
         assert!(parses(&["__combo-demo"]));
         assert!(parses(&["__check-config", "c.toml"]));
         assert!(!parses(&["__check-config"]));

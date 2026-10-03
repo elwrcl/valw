@@ -48,6 +48,8 @@ struct Uniforms {
 pub struct Paint {
     gl: glow::Context,
     u: Uniforms,
+    // Read by set_overlay, which the picker (theme plan Task 6) starts using.
+    #[allow(dead_code)]
     overlay: glow::Texture,
     size: (u32, u32),
     egl: Egl,
@@ -104,9 +106,22 @@ impl Paint {
         })
     }
 
+    /// Several renderers (one per output) share the EGL display: each makes
+    /// its own context current before touching GL.
+    fn current(&self) -> Result<()> {
+        self.egl
+            .make_current(
+                self.display,
+                Some(self.surface),
+                Some(self.surface),
+                Some(self.context),
+            )
+            .context("eglMakeCurrent failed")
+    }
+
     /// The surface's buffer size changed.
     pub fn resize(&mut self, size: (u32, u32)) {
-        if size != self.size {
+        if size != self.size && self.current().is_ok() {
             self.window.resize(size.0 as i32, size.1 as i32, 0, 0);
             unsafe { self.gl.viewport(0, 0, size.0 as i32, size.1 as i32) };
             self.size = size;
@@ -115,7 +130,11 @@ impl Paint {
 
     /// Shows `pixmap` (premultiplied RGBA, the surface's size) over the
     /// paint, or nothing.
+    #[allow(dead_code)] // the picker (theme plan Task 6) removes this
     pub fn set_overlay(&mut self, pixmap: Option<&tiny_skia::Pixmap>) {
+        if self.current().is_err() {
+            return;
+        }
         unsafe {
             self.gl
                 .uniform_1_i32(Some(&self.u.use_overlay), pixmap.is_some() as i32);
@@ -139,6 +158,7 @@ impl Paint {
 
     /// Draws `frame` and swaps (which commits the surface).
     pub fn draw(&self, frame: &Frame) -> Result<()> {
+        self.current()?;
         let p = frame.palette;
         unsafe {
             let gl = &self.gl;
@@ -168,7 +188,8 @@ impl Drop for Paint {
         let _ = self.egl.make_current(self.display, None, None, None);
         let _ = self.egl.destroy_surface(self.display, self.surface);
         let _ = self.egl.destroy_context(self.display, self.context);
-        let _ = self.egl.terminate(self.display);
+        // No eglTerminate: the display is shared by every renderer on this
+        // connection, and terminating it would break the others.
     }
 }
 
