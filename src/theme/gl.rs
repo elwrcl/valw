@@ -48,8 +48,6 @@ struct Uniforms {
 pub struct Paint {
     gl: glow::Context,
     u: Uniforms,
-    // Read by set_overlay, which the picker (theme plan Task 6) starts using.
-    #[allow(dead_code)]
     overlay: glow::Texture,
     size: (u32, u32),
     egl: Egl,
@@ -130,7 +128,6 @@ impl Paint {
 
     /// Shows `pixmap` (premultiplied RGBA, the surface's size) over the
     /// paint, or nothing.
-    #[allow(dead_code)] // the picker (theme plan Task 6) removes this
     pub fn set_overlay(&mut self, pixmap: Option<&tiny_skia::Pixmap>) {
         if self.current().is_err() {
             return;

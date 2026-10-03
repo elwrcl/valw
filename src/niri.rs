@@ -108,7 +108,6 @@ pub fn is_our_capture(event: &Event, path: &Path) -> bool {
 }
 
 /// Every window niri has.
-#[allow(dead_code)] // the picker (theme plan Task 6) removes this
 pub fn windows() -> Result<Vec<Window>> {
     match request(Request::Windows)? {
         Response::Windows(windows) => Ok(windows),
@@ -118,7 +117,6 @@ pub fn windows() -> Result<Vec<Window>> {
 
 /// `windows` most recently used first: the focused one, then by focus
 /// time, then those never focused, by id.
-#[allow(dead_code)] // the picker (theme plan Task 6) removes this
 pub fn mru(mut windows: Vec<Window>) -> Vec<Window> {
     windows.sort_by_key(|w| {
         let at = w.focus_timestamp.map(|t| (t.secs, t.nanos));

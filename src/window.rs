@@ -16,7 +16,15 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 /// on, if niri knows. Esc during the pick is `Cancelled`.
 pub fn capture(cursor: bool) -> Result<(RgbaImage, Option<String>)> {
     let window = niri::pick_window()?.ok_or(Cancelled)?;
-    tracing::info!("picked window {} ({:?})", window.id, window.app_id);
+    capture_window(&window, cursor)
+}
+
+/// Captures `window` (chosen by niri's pick or by valw's picker).
+pub fn capture_window(
+    window: &niri_ipc::Window,
+    cursor: bool,
+) -> Result<(RgbaImage, Option<String>)> {
+    tracing::info!("capturing window {} ({:?})", window.id, window.app_id);
     let tmp = TempFile(temp_path());
     niri::screenshot_window(window.id, &tmp.0, cursor, TIMEOUT)?;
     let image = crate::thumbnail::load(&tmp.0)?;

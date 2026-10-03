@@ -13,8 +13,6 @@ mod lock;
 mod log;
 mod niri;
 mod output;
-// The picker lands in pieces; Task 6 of the theme plan removes this.
-#[allow(dead_code)]
 mod picker;
 mod region;
 mod render;
@@ -67,8 +65,11 @@ enum Command {
         #[command(flatten)]
         common: Common,
     },
-    /// Click a window to capture it (Cmd+Shift+4, then Space).
+    /// Pick a window from cards over the paint shader (Alt+Tab-like).
     Window {
+        /// Click the window on screen instead (niri's pick).
+        #[arg(long)]
+        pick: bool,
         #[command(flatten)]
         common: Common,
     },
@@ -159,9 +160,14 @@ fn parse_delay(s: &str) -> Result<Duration, String> {
 type Shots = (Vec<(RgbaImage, Option<String>)>, usize, String);
 
 enum Mode {
-    Screen { all: bool },
+    Screen {
+        all: bool,
+    },
     Region,
-    Window,
+    /// `pick`: niri's click-a-window instead of valw's picker.
+    Window {
+        pick: bool,
+    },
     Zoom,
 }
 
@@ -206,7 +212,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::PreviewHost => host::run(),
         Command::Screen { all, common } => capture(Mode::Screen { all }, common),
         Command::Region { common } => capture(Mode::Region, common),
-        Command::Window { common } => capture(Mode::Window, common),
+        Command::Window { pick, common } => capture(Mode::Window { pick }, common),
         Command::Zoom { common } => capture(Mode::Zoom, common),
         Command::Edit { file } => editor::run(&file),
         // Handled in main, before logging starts.
@@ -272,13 +278,18 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
                 region::Choice::Window => {
                     drop(frames);
                     windowed = true;
-                    window_shot(&outputs, cursor)?
+                    window_shot(&outputs, cursor, None)?
                 }
             }
         }
-        Mode::Window => {
+        Mode::Window { pick } => {
             windowed = true;
-            window_shot(&outputs, cursor)?
+            let chosen = if pick {
+                None
+            } else {
+                Some(picker::run(&mut wl, &outputs[focused_output(&outputs)])?)
+            };
+            window_shot(&outputs, cursor, chosen)?
         }
         Mode::Zoom => {
             let focused = focused_output(&outputs);
@@ -327,8 +338,15 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
 
 /// A window shot, shaped like the other modes' results. The preview goes to
 /// the window's output, or niri's focused one if that is unknown.
-fn window_shot(outputs: &[wayland::Output], cursor: bool) -> Result<Shots> {
-    let (image, output) = window::capture(cursor)?;
+fn window_shot(
+    outputs: &[wayland::Output],
+    cursor: bool,
+    chosen: Option<niri_ipc::Window>,
+) -> Result<Shots> {
+    let (image, output) = match chosen {
+        Some(w) => window::capture_window(&w, cursor)?,
+        None => window::capture(cursor)?,
+    };
     let source = output.unwrap_or_else(|| outputs[focused_output(outputs)].geom.name.clone());
     Ok((vec![(image, None)], 0, source))
 }
@@ -337,7 +355,7 @@ fn window_shot(outputs: &[wayland::Output], cursor: bool) -> Result<Shots> {
 fn from_toolbar(pick: toolbar::Picked) -> (Mode, Common) {
     let mode = match pick.mode {
         toolbar::state::Mode::Screen => Mode::Screen { all: false },
-        toolbar::state::Mode::Window => Mode::Window,
+        toolbar::state::Mode::Window => Mode::Window { pick: false },
         toolbar::state::Mode::Region => Mode::Region,
         toolbar::state::Mode::Zoom => Mode::Zoom,
     };
@@ -452,6 +470,7 @@ mod tests {
         assert!(parses(&["__clipboard"]));
         assert!(parses(&["toolbar"]));
         assert!(parses(&["backdrop"]));
+        assert!(parses(&["window", "--pick"]));
         assert!(parses(&["__combo-demo"]));
         assert!(parses(&["__check-config", "c.toml"]));
         assert!(!parses(&["__check-config"]));
@@ -474,7 +493,7 @@ mod tests {
         );
         assert!(matches!(
             from_toolbar(pick(T::Window, false, true)).0,
-            Mode::Window
+            Mode::Window { pick: false }
         ));
         assert!(matches!(
             from_toolbar(pick(T::Region, false, true)).0,

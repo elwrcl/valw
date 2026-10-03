@@ -26,7 +26,7 @@ fn paint(c: [u8; 4]) -> Paint<'static> {
     p
 }
 
-fn rounded(pixmap: &mut Pixmap, r: Rect, radius: f32, color: [u8; 4], scale: f32) {
+pub(crate) fn rounded(pixmap: &mut Pixmap, r: Rect, radius: f32, color: [u8; 4], scale: f32) {
     let (x, y, w, h, k) = (
         r.x * scale,
         r.y * scale,

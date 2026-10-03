@@ -42,6 +42,7 @@ use crate::dnd::Outcome;
 use crate::error::HintExt;
 use crate::frame::OutputGeom;
 use crate::host::Host;
+use crate::picker::Picker;
 use crate::region::Overlay;
 use crate::toolbar::{Pill, Toolbar};
 use crate::zoom::Zoom;
@@ -90,6 +91,8 @@ pub struct State {
     pub pill: Option<Pill>,
     /// `valw backdrop`'s surfaces.
     pub backdrop: Option<Backdrop>,
+    /// `valw window`'s picker, while it is open.
+    pub picker: Option<Picker>,
     /// The preview thumbnails, in the preview host process.
     pub preview: Option<Host>,
 }
@@ -125,6 +128,7 @@ impl Wayland {
             toolbar: None,
             pill: None,
             backdrop: None,
+            picker: None,
             preview: None,
         };
         // Two round trips: one for wl_output, one for the xdg-output details.
@@ -317,6 +321,9 @@ impl CompositorHandler for State {
         if let Some(backdrop) = &mut self.backdrop {
             backdrop.frame_done(surface, qh);
         }
+        if let Some(picker) = &mut self.picker {
+            picker.frame_done(surface, qh);
+        }
         if let Some(preview) = &mut self.preview {
             preview.frame_done(surface, qh);
         }
@@ -383,6 +390,9 @@ impl LayerShellHandler for State {
         if let Some(backdrop) = &mut self.backdrop {
             backdrop.closed(layer);
         }
+        if let Some(picker) = &mut self.picker {
+            picker.closed(layer);
+        }
         if let Some(preview) = &mut self.preview {
             preview.closed(layer);
         }
@@ -410,6 +420,9 @@ impl LayerShellHandler for State {
         }
         if let Some(backdrop) = &mut self.backdrop {
             backdrop.configure(conn, layer, configure.new_size, qh);
+        }
+        if let Some(picker) = &mut self.picker {
+            picker.configure(conn, layer, configure.new_size, qh);
         }
         if let Some(preview) = &mut self.preview {
             preview.configure(layer, qh);
@@ -519,6 +532,9 @@ impl KeyboardHandler for State {
         if let Some(toolbar) = &mut self.toolbar {
             toolbar.key(event.keysym);
         }
+        if let Some(picker) = &mut self.picker {
+            picker.key(event.keysym);
+        }
     }
 
     fn repeat_key(
@@ -562,6 +578,9 @@ impl KeyboardHandler for State {
         if let Some(overlay) = &mut self.overlay {
             overlay.modifiers(modifiers, qh);
         }
+        if let Some(picker) = &mut self.picker {
+            picker.modifiers(modifiers);
+        }
     }
 }
 
@@ -584,6 +603,9 @@ impl PointerHandler for State {
         }
         if let Some(pill) = &mut self.pill {
             pill.pointer(events);
+        }
+        if let Some(picker) = &mut self.picker {
+            picker.pointer(events, self.cursor_device.as_ref());
         }
         if self.preview.is_some() {
             crate::host::pointer(self, events, qh);
