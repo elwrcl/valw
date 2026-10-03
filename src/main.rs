@@ -287,7 +287,11 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
             let chosen = if pick {
                 None
             } else {
-                Some(picker::run(&mut wl, &outputs[focused_output(&outputs)])?)
+                let window = picker::run(&mut wl, &outputs[focused_output(&outputs)])?;
+                // While the picker had the keyboard, niri showed every window
+                // as inactive; give the chosen one a moment to redraw active.
+                std::thread::sleep(Duration::from_millis(150));
+                Some(window)
             };
             window_shot(&outputs, cursor, chosen)?
         }
