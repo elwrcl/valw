@@ -67,6 +67,11 @@
           pkgs.runCommand "valw-home-module" { } ''
             grep -qx 'timeout_secs = 3' ${set.xdg.configFile."valw/config.toml".source}
             grep -qx 'volume = 0.4' ${set.xdg.configFile."valw/config.toml".source}
+            # Quiet, and no home directory needed.
+            HOME=/nonexistent ${valw}/bin/valw __check-config ${
+              set.xdg.configFile."valw/config.toml".source
+            } 2> err
+            test ! -s err
             touch $out
           '';
 

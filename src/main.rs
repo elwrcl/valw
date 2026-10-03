@@ -160,6 +160,16 @@ enum Mode {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // home-manager runs this in the build sandbox: no home, no logs, quiet.
+    if let Command::CheckConfig { file } = &cli.command {
+        return match config::check(file) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprint!("{}", error::render(&e, None));
+                ExitCode::FAILURE
+            }
+        };
+    }
     let log = log::init(&log::default_dir(), Local::now());
     log::install_panic_hook(log.clone());
     tracing::info!(
@@ -191,6 +201,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Window { common } => capture(Mode::Window, common),
         Command::Zoom { common } => capture(Mode::Zoom, common),
         Command::Edit { file } => editor::run(&file),
+        // Handled in main, before logging starts.
         Command::CheckConfig { file } => config::check(&file),
         Command::ComboDemo => sound::demo(&config::load(&config::default_path())?.sound),
         Command::Toolbar => {
