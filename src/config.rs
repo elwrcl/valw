@@ -169,6 +169,20 @@ pub fn parse(text: &str) -> Result<(Config, Vec<String>)> {
     Ok((config, unknown))
 }
 
+/// Checks a config file strictly, for home-manager's build: invalid values
+/// and unknown keys are errors (at run time unknown keys only warn).
+pub fn check(path: &Path) -> Result<()> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("could not read {}", path.display()))?;
+    let (_, unknown) =
+        parse(&text).with_context(|| format!("invalid config file {}", path.display()))?;
+    match unknown.len() {
+        0 => Ok(()),
+        1 => bail!("unknown config key: {}", unknown[0]),
+        _ => bail!("unknown config keys: {}", unknown.join(", ")),
+    }
+}
+
 pub fn expand_home(path: &str, home: &Path) -> PathBuf {
     if path == "~" || path == "$HOME" {
         return home.to_path_buf();
@@ -291,6 +305,48 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "sound.combo_reset_secs must be between 1 and 60"
+        );
+    }
+
+    #[test]
+    fn check_accepts_valid_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[preview]\ntimeout_secs = 3\n[sound]\nvolume = 0.4\n",
+        )
+        .unwrap();
+        check(&path).unwrap();
+        std::fs::write(&path, "").unwrap();
+        check(&path).unwrap();
+    }
+
+    #[test]
+    fn check_rejects_invalid_values_with_valws_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[sound]\nvolume = 2.0\n").unwrap();
+        let err = format!("{:#}", check(&path).unwrap_err());
+        assert!(
+            err.contains("sound.volume must be between 0 and 1"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn check_rejects_unknown_keys_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[preview]\ntimout_secs = 3\n").unwrap();
+        assert_eq!(
+            check(&path).unwrap_err().to_string(),
+            "unknown config key: preview.timout_secs"
+        );
+        std::fs::write(&path, "[preview]\ntimout_secs = 3\n[sund]\nx = 1\n").unwrap();
+        assert_eq!(
+            check(&path).unwrap_err().to_string(),
+            "unknown config keys: preview.timout_secs, sund"
         );
     }
 

@@ -84,6 +84,9 @@ enum Command {
     /// Internal: the process that shows preview thumbnails.
     #[command(name = "__preview-host", hide = true)]
     PreviewHost,
+    /// Internal: check a config file (home-manager runs it at build time).
+    #[command(name = "__check-config", hide = true)]
+    CheckConfig { file: PathBuf },
     /// Internal: play the whole combo, for tuning the sounds by ear.
     #[command(name = "__combo-demo", hide = true)]
     ComboDemo,
@@ -188,6 +191,7 @@ fn run(cli: Cli) -> Result<()> {
         Command::Window { common } => capture(Mode::Window, common),
         Command::Zoom { common } => capture(Mode::Zoom, common),
         Command::Edit { file } => editor::run(&file),
+        Command::CheckConfig { file } => config::check(&file),
         Command::ComboDemo => sound::demo(&config::load(&config::default_path())?.sound),
         Command::Toolbar => {
             let config = config::load(&config::default_path())?;
@@ -429,6 +433,8 @@ mod tests {
         assert!(parses(&["__clipboard"]));
         assert!(parses(&["toolbar"]));
         assert!(parses(&["__combo-demo"]));
+        assert!(parses(&["__check-config", "c.toml"]));
+        assert!(!parses(&["__check-config"]));
     }
 
     #[test]
@@ -530,6 +536,7 @@ mod tests {
         assert!(!help.contains("preview-host"), "{help}");
         assert!(!help.contains("__clipboard"), "{help}");
         assert!(!help.contains("combo-demo"), "{help}");
+        assert!(!help.contains("check-config"), "{help}");
     }
 
     #[test]
