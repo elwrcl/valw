@@ -18,6 +18,9 @@ mod selection;
 mod shadow;
 mod sound;
 mod stack;
+// The theme lands in pieces; Task 2 of the theme plan removes this.
+#[allow(dead_code)]
+mod theme;
 mod thumbnail;
 mod toolbar;
 mod wayland;
