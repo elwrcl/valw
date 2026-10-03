@@ -30,6 +30,11 @@ const SPEED: f32 = 0.35;
 /// A pause this long means the overview was closed: re-read the wallpaper.
 const PAUSE: Duration = Duration::from_secs(2);
 const EASE: Duration = Duration::from_secs(1);
+/// The paint is soft: drawn at this fraction of the output's resolution and
+/// scaled up by the compositor, it looks the same at a fraction of the cost.
+const RENDER_SCALE: f64 = 0.5;
+/// Draw on every n-th frame callback (30 fps at 60 Hz): the flow is slow.
+const DRAW_EVERY: u32 = 2;
 
 /// Whether to re-read the wallpaper's colours before this frame.
 pub fn should_refresh(last_frame: Option<Instant>, now: Instant) -> bool {
@@ -70,6 +75,8 @@ struct Surface {
     changed: Instant,
     /// A wallpaper palette being worked out on a thread.
     incoming: Option<mpsc::Receiver<Option<Palette>>>,
+    /// Frame callbacks since the last draw.
+    skipped: u32,
 }
 
 #[derive(Default)]
@@ -136,6 +143,7 @@ pub fn add(state: &mut State, qh: &QueueHandle<State>, output: &WlOutput) {
             to: palette,
             changed: now,
             incoming: None,
+            skipped: 0,
         });
     }
 }
@@ -171,8 +179,8 @@ impl Backdrop {
             return;
         }
         let px = (
-            (w as f64 * s.scale).round() as u32,
-            (h as f64 * s.scale).round() as u32,
+            ((w as f64 * s.scale * RENDER_SCALE).round() as u32).max(1),
+            ((h as f64 * s.scale * RENDER_SCALE).round() as u32).max(1),
         );
         s.viewport.set_destination(w as i32, h as i32);
         match &mut s.paint {
@@ -197,6 +205,15 @@ impl Backdrop {
 
 impl Surface {
     fn draw(&mut self, qh: &QueueHandle<State>) {
+        // Between draws, only ask for the next frame (an empty commit).
+        self.skipped += 1;
+        if self.skipped < DRAW_EVERY && self.last_frame.is_some() {
+            let surface = self.layer.wl_surface();
+            surface.frame(qh, FrameCallbackData(surface.clone()));
+            surface.commit();
+            return;
+        }
+        self.skipped = 0;
         let now = Instant::now();
         if should_refresh(self.last_frame, now) && self.incoming.is_none() {
             let (tx, rx) = mpsc::channel();
