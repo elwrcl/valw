@@ -45,12 +45,21 @@
             valw at build time. Empty means valw's defaults.
           '';
         };
+        noctalia.enable = lib.mkEnableOption ''
+          valw's Noctalia plugin (a bar button, the toolbar as a Noctalia
+          panel and a control-center tile), linked into
+          `$XDG_DATA_HOME/noctalia/plugins/valw`. Enable `elars/valw` and
+          place its widget in Noctalia's own settings
+        '';
       };
 
       config = lib.mkIf cfg.enable {
         home.packages = [ cfg.package ];
         xdg.configFile."valw/config.toml" = lib.mkIf (cfg.settings != { }) {
           source = checked cfg.settings;
+        };
+        xdg.dataFile."noctalia/plugins/valw" = lib.mkIf cfg.noctalia.enable {
+          source = "${cfg.package}/share/valw/noctalia-plugin";
         };
       };
     };

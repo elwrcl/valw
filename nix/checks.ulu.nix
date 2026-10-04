@@ -13,28 +13,32 @@
       # The home-manager module, evaluated with stand-ins for the two
       # home-manager options it sets (no home-manager input needed).
       homeModule =
-        settings:
+        valwConfig:
         (lib.evalModules {
           modules = [
             self.homeModules.default
             (
               { lib, ... }:
-              {
-                options.home.packages = lib.mkOption {
-                  type = lib.types.listOf lib.types.package;
-                  default = [ ];
-                };
-                options.xdg.configFile = lib.mkOption {
+              let
+                files = lib.mkOption {
                   type = lib.types.attrsOf (
                     lib.types.submodule { options.source = lib.mkOption { type = lib.types.path; }; }
                   );
                   default = { };
                 };
+              in
+              {
+                options.home.packages = lib.mkOption {
+                  type = lib.types.listOf lib.types.package;
+                  default = [ ];
+                };
+                options.xdg.configFile = files;
+                options.xdg.dataFile = files;
                 config._module.args.pkgs = pkgs;
                 config.programs.valw = {
                   enable = true;
-                  inherit settings;
-                };
+                }
+                // valwConfig;
               }
             )
           ];
@@ -58,12 +62,19 @@
           let
             plain = homeModule { };
             set = homeModule {
-              preview.timeout_secs = 3;
-              sound.volume = 0.4;
+              settings = {
+                preview.timeout_secs = 3;
+                sound.volume = 0.4;
+              };
             };
+            noctalia = homeModule { noctalia.enable = true; };
           in
           assert lib.assertMsg (plain.home.packages == [ valw ]) "the module installs valw";
           assert lib.assertMsg (plain.xdg.configFile == { }) "no settings, no config file";
+          assert lib.assertMsg (plain.xdg.dataFile == { }) "no Noctalia plugin unless asked";
+          assert lib.assertMsg (
+            noctalia.xdg.dataFile."noctalia/plugins/valw".source == "${valw}/share/valw/noctalia-plugin"
+          ) "the plugin is linked where Noctalia looks";
           pkgs.runCommand "valw-home-module" { } ''
             grep -qx 'timeout_secs = 3' ${set.xdg.configFile."valw/config.toml".source}
             grep -qx 'volume = 0.4' ${set.xdg.configFile."valw/config.toml".source}
@@ -79,7 +90,8 @@
           let
             fails =
               settings:
-              pkgs.testers.testBuildFailure (homeModule settings).xdg.configFile."valw/config.toml".source;
+              pkgs.testers.testBuildFailure
+                (homeModule { inherit settings; }).xdg.configFile."valw/config.toml".source;
           in
           pkgs.runCommand "valw-home-module-rejects" { } ''
             grep -q 'sound.volume must be between 0 and 1' ${fails { sound.volume = 2; }}/testBuildFailure.log

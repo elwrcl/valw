@@ -61,7 +61,7 @@ binds {
 | `valw region` | Drag a region; Shift locks an axis, Alt grows from the centre, Space moves it; Space before dragging switches to window mode |
 | `valw window [--pick]` | Pick a window from cards over a liquid-paint background (Tab/arrows, Enter, Esc); `--pick` clicks it on screen instead |
 | `valw zoom` | Freeze the screen and zoom: wheel, drag, `f` flashlight, `c` capture the view, `0` reset, Esc |
-| `valw toolbar` | Pick a mode from a floating bar, with a timer and options |
+| `valw toolbar` | Pick a mode from a floating bar, with a timer and options; `--state`, `--set KEY=VALUE` and `--run [MODE]` drive it without the bar (the Noctalia plugin uses them) |
 | `valw edit FILE` | The markup editor (clicking a preview opens it) |
 | `valw backdrop` | Keep running: the liquid-paint background behind niri's overview (below) |
 | `valw doctor` | What the compositor and system support |
@@ -88,6 +88,24 @@ layer-rule {
 With Noctalia, turn its own backdrop off (`[backdrop] enabled = false`).
 Colours elsewhere (the region dim, the window picker's fallback) follow
 Noctalia's current community palette when there is one.
+
+## Noctalia
+
+With [Noctalia](https://noctalia.dev), valw comes as a plugin: a camera
+button on the bar (left click: the toolbar, right click: a region shot),
+the toolbar as a Noctalia panel and a control-center tile. Noctalia draws
+them, so they follow your Noctalia theme.
+
+```nix
+programs.valw.noctalia.enable = true;
+```
+
+Then enable `elars/valw` in Noctalia, add a widget of type `elars/valw:bar`
+to a bar, and bind the toolbar:
+
+```kdl
+Mod+Shift+T { spawn "noctalia" "msg" "panel-toggle" "elars/valw:toolbar"; }
+```
 
 ## Configuration
 

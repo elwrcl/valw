@@ -188,3 +188,15 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - The backdrop calls every lock error "another backdrop is running"; it keeps its first scale after a scale change.
 - libEGL is unloaded when the last backdrop surface goes; a removed output leaks its viewport object.
 - Holding Tab doesn't repeat in the picker; "no windows" exits as an error instead of a cancel.
+
+## Noctalia plugin
+
+- [ ] `programs.valw.noctalia.enable` + `elars/valw` enabled: the camera button appears where the widget is placed; its tooltip says Screenshot.
+- [ ] Left click opens the toolbar panel next to the bar; it uses Noctalia's colours, font, corners and border; switching the palette or light/dark restyles it.
+- [ ] The remembered mode is highlighted; Screen / Region / Window / Zoom each capture, and the panel is never in the shot.
+- [ ] Timer and the three toggles persist, and match what `valw toolbar` (the self-drawn bar) shows, both ways; the timer shows valw's countdown.
+- [ ] Right click on the button: a region shot (no timer).
+- [ ] Control-center tile: click closes the control center, then a region shot; right click opens the toolbar panel.
+- [ ] `noctalia msg panel-toggle elars/valw:toolbar` (Mod+Shift+T) opens and closes the panel.
+- [ ] With valw off Noctalia's PATH: "valw is not available" and a notification, no crash.
+- [ ] Turkish locale: the Turkish strings appear.
