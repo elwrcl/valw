@@ -2,13 +2,17 @@
 -- The control-center tile. Runs after stubs.luau and shortcut.luau.
 
 onClick()
-assert(calls.run[1] == "noctalia msg panel-close; sleep 0.3 && valw region", calls.run[1])
+assert(
+  calls.stream[1] == "(noctalia msg panel-close >/dev/null 2>&1; sleep 0.3 && valw region) 2>&1; echo valw-exit:$?",
+  calls.stream[1]
+)
+assert(#calls.run == 0, "never through runAsync's timeout")
 reset()
-fake.answers["noctalia msg panel-close"] = { exitCode = 1, stdout = "", stderr = "error: busy\n" }
+fake.streams["(noctalia msg panel-close"] = valwFailure("busy", 1)
 onClick()
-assert(calls.notify[1][2] == "error: busy", "failure notified")
+assert(calls.notify[1][2] == "busy", "failure notified")
 reset()
-fake.answers["noctalia msg panel-close"] = { exitCode = 3, stdout = "", stderr = "" }
+fake.streams["(noctalia msg panel-close"] = { "valw-exit:3" }
 onClick()
 assert(#calls.notify == 0, "cancel is silent")
 ok("click")

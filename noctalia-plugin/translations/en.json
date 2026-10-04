@@ -1,8 +1,29 @@
 {
-  "bar": { "tooltip": "Screenshot" },
-  "tile": { "label": "Screenshot" },
-  "panel": { "unavailable": "valw is not available" },
-  "mode": { "screen": "Screen", "region": "Region", "window": "Window", "zoom": "Zoom" },
-  "timer": { "label": "Timer", "off": "Off" },
-  "option": { "cursor": "Show cursor", "preview": "Show preview", "sound": "Play sound" }
+  "bar": {
+    "tooltip": "Screenshot"
+  },
+  "tile": {
+    "label": "Screenshot"
+  },
+  "panel": {
+    "unavailable": "valw is not available"
+  },
+  "mode": {
+    "screen": "Screen",
+    "region": "Region",
+    "window": "Window",
+    "zoom": "Zoom"
+  },
+  "timer": {
+    "label": "Timer",
+    "off": "Off"
+  },
+  "option": {
+    "cursor": "Show cursor",
+    "preview": "Show preview",
+    "sound": "Play sound"
+  },
+  "error": {
+    "failed": "valw failed"
+  }
 }

@@ -89,18 +89,23 @@ about 360 × 220.
 - On open (`onOpen`): `valw toolbar --state` → `noctalia.json.decode` →
   render. If valw is missing (`noctalia.commandExists`) or the call fails:
   a single label "valw is not available" and `noctalia.notifyError` with
-  the stderr's last line.
+  valw's error message (its `error:` line).
 - A row of four buttons with glyphs and labels: Screen (`device-desktop`),
   Region (`crop`), Window (`app-window`), Zoom (`zoom-in`). The
   remembered mode is `variant = "primary"`, the others `"outline"`.
 - A click on a mode: `panel.close()`, then
   `sleep 0.3 && valw toolbar --run <mode>` (the wait lets the panel
-  disappear before the screen is frozen or captured). A non-zero exit
-  other than 3 → `noctalia.notifyError("valw", <stderr's last line>)`.
+  disappear before the screen is frozen or captured). Captures run with
+  `noctalia.runStream` (stderr folded in, the exit status echoed last):
+  `runAsync` with a callback kills its command after 5 s, and a region,
+  a zoom or the timer can take longer. A non-zero exit other than 3 →
+  `noctalia.notifyError("valw", <valw's error: line>)`.
 - Below: "Timer" `ui.select` with `Off`, `5 s`, `10 s` (from `timers`),
   and three `ui.toggle`s: "Show cursor", "Show preview", "Play sound".
-  A change re-renders at once and runs `valw toolbar --set <key>=<value>`;
-  a failure → `notifyError`.
+  A change re-renders at once and runs `valw toolbar --set` with every
+  choice (so two quick changes can't undo each other); a failure →
+  `notifyError`. `--state` and `--set` start no run log (they would push
+  the capture logs out).
 - Colours only by Noctalia role names (`primary`, `on_surface`,
   `outline`, …); no hex colours anywhere in the plugin.
 

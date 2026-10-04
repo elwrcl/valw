@@ -1247,7 +1247,7 @@ noctalia msg plugins enable elars/valw
 noctalia msg panel-toggle elars/valw:toolbar
 ```
 
-Expected: the panel appears near the bar with the four modes, the timer and three toggles, in Noctalia's style. Ask the user to confirm what they see, then close it (`noctalia msg panel-close`). Check `grep -i valw ~/.cache/noctalia/noctalia.log | tail -20` for Luau errors (unknown glyph names, bad props); fix any in the plugin, rerun Task 3's tests, and commit (`jj commit -m "noctalia-plugin: fixes from the live Noctalia" noctalia-plugin`).
+Expected: the panel appears near the bar with the four modes, the timer and three toggles, in Noctalia's style. Ask the user to confirm what they see, then close it (`noctalia msg panel-close`). With the user's go-ahead, also take two real shots from the panel: one with the timer at 5 s (the countdown runs, the shot lands, no error notification) and one Region shot held open for more than 6 s before selecting (it must not be killed). Check that nothing is clipped at 360×220 (the "Play sound" row, the four mode buttons in Turkish); adjust `width`/`height` in `plugin.toml` if needed. Check `grep -i valw ~/.cache/noctalia/noctalia.log | tail -20` for Luau errors (unknown glyph names, bad props); fix any in the plugin, rerun Task 3's tests, and commit (`jj commit -m "noctalia-plugin: fixes from the live Noctalia" noctalia-plugin`).
 
 - [ ] **Step 4: Undo the dev install**
 

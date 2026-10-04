@@ -7,18 +7,19 @@ ok("renders")
 
 onClick()
 assert(calls.toggled[1] == "elars/valw:toolbar", "left click toggles the panel")
-assert(#calls.run == 0)
+assert(#calls.run == 0 and #calls.stream == 0)
 ok("left click")
 
 reset()
 onRightClick()
-assert(calls.run[1] == "valw region", calls.run[1])
+assert(calls.stream[1] == "(valw region) 2>&1; echo valw-exit:$?", calls.stream[1])
+assert(#calls.run == 0, "never through runAsync's timeout")
 reset()
-fake.answers["valw region"] = { exitCode = 1, stdout = "", stderr = "error: busy\n" }
+fake.streams["(valw region)"] = valwFailure("busy", 1)
 onRightClick()
-assert(calls.notify[1][2] == "error: busy", "failure notified")
+assert(calls.notify[1][2] == "busy", "failure notified")
 reset()
-fake.answers["valw region"] = { exitCode = 3, stdout = "", stderr = "" }
+fake.streams["(valw region)"] = { "valw-exit:3" }
 onRightClick()
 assert(#calls.notify == 0, "cancel is silent")
 ok("right click")

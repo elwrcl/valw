@@ -2,11 +2,13 @@
 -- Stand-ins for Noctalia's globals. Each test is run as one chunk:
 -- these stubs, then the entry script, then the test (see run.sh).
 
-calls = { run = {}, notify = {}, toggled = {}, closed = 0, order = {} }
+calls = { run = {}, stream = {}, notify = {}, toggled = {}, closed = 0, order = {} }
 fake = {
   exists = true,
   -- runAsync answers by command prefix: { exitCode, stdout, stderr }
   answers = {},
+  -- runStream lines by command prefix; default: a clean exit
+  streams = {},
   decoded = nil,
 }
 rendered = nil
@@ -36,6 +38,17 @@ noctalia = {
       end
       callback(answer)
     end
+    return true
+  end,
+  -- No timeout here (runAsync with a callback kills after 5 s): captures.
+  runStream = function(command, onLine)
+    table.insert(calls.stream, command)
+    table.insert(calls.order, "stream")
+    local lines = { "valw-exit:0" }
+    for prefix, l in pairs(fake.streams) do
+      if string.sub(command, 1, #prefix) == prefix then lines = l end
+    end
+    for _, line in ipairs(lines) do onLine(line) end
     return true
   end,
   notifyError = function(title, body) table.insert(calls.notify, { title, body }) end,
@@ -77,7 +90,17 @@ function button(text)
 end
 
 function reset()
-  calls = { run = {}, notify = {}, toggled = {}, closed = 0, order = {} }
+  calls = { run = {}, stream = {}, notify = {}, toggled = {}, closed = 0, order = {} }
+end
+
+-- valw's stderr on an error: the message first, then cause, hint and log.
+function valwError(message)
+  return "error: " .. message .. "\n  cause: something\n  log:   /home/u/.local/state/valw/logs/x.log\n"
+end
+
+-- The same as stream lines, ending with the exit status.
+function valwFailure(message, code)
+  return { "error: " .. message, "  log:   /home/u/.local/state/valw/logs/x.log", "valw-exit:" .. code }
 end
 
 function ok(name)
