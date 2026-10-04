@@ -130,7 +130,7 @@ scroll_step = 1.15
 flashlight_radius = 180
 
 [editor]
-backend = "builtin"   # or "satty"
+backend = "builtin"   # or "satty", or "noctalia" (its annotator)
 
 [sound]
 enabled = true

@@ -68,6 +68,9 @@ pub enum Backend {
     #[default]
     Builtin,
     Satty,
+    /// Noctalia's annotator: it saves a new "annotated" file instead of
+    /// overwriting the shot.
+    Noctalia,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -285,6 +288,8 @@ mod tests {
         assert_eq!(Config::default().editor.backend, Backend::Builtin);
         let (config, _) = parse("[editor]\nbackend = \"satty\"\n").unwrap();
         assert_eq!(config.editor.backend, Backend::Satty);
+        let (config, _) = parse("[editor]\nbackend = \"noctalia\"\n").unwrap();
+        assert_eq!(config.editor.backend, Backend::Noctalia);
         assert!(parse("[editor]\nbackend = \"gimp\"\n").is_err());
     }
 

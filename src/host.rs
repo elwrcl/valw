@@ -501,8 +501,9 @@ fn add(state: &mut State, path: &Path, output_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// The command that opens `path` in the configured editor; both save over
-/// the file.
+/// The command that opens `path` in the configured editor. The built-in
+/// editor and Satty save over the file; Noctalia's annotator saves a new
+/// one next to it (or copies), leaving the shot as it was.
 fn editor_command(backend: Backend, path: &Path, exe: &Path) -> std::process::Command {
     let mut command = match backend {
         Backend::Builtin => {
@@ -516,6 +517,11 @@ fn editor_command(backend: Backend, path: &Path, exe: &Path) -> std::process::Co
                 .arg(path)
                 .arg("--output-filename")
                 .arg(path);
+            c
+        }
+        Backend::Noctalia => {
+            let mut c = std::process::Command::new("noctalia");
+            c.args(["msg", "annotate"]).arg(path);
             c
         }
     };
@@ -572,6 +578,12 @@ mod tests {
                 "--output-filename",
                 "/p/Shot 1.png"
             ]
+        );
+        let noctalia = editor_command(Backend::Noctalia, path, exe);
+        assert_eq!(noctalia.get_program(), "noctalia");
+        assert_eq!(
+            noctalia.get_args().collect::<Vec<_>>(),
+            ["msg", "annotate", "/p/Shot 1.png"]
         );
     }
 

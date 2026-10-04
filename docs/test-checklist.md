@@ -80,6 +80,7 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 ## Editor (Phase 5a)
 
 - [ ] Clicking a preview opens `valw edit` (title `<name> — valw`); `[editor] backend = "satty"` still opens Satty.
+- [ ] `[editor] backend = "noctalia"`: clicking a preview opens the shot in Noctalia's annotator, in the Noctalia theme; Save writes a new "annotated" file in the screenshots folder (the shot stays as it was), Copy puts the result on the clipboard.
 - [ ] Each tool draws (arrow head at the release point, outline rectangle/ellipse, line, pen dot on a click, translucent highlighter); Shift snaps lines to 45° and makes squares/circles.
 - [ ] Colours and S/M/L change new shapes only; A/R/O/L/P/H switch tools.
 - [ ] Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y and the toolbar buttons undo and redo.
