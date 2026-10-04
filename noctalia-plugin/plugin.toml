@@ -22,8 +22,8 @@ entry = "bar.luau"
 [[panel]]
 id = "toolbar"
 entry = "panel.luau"
-width = 360
-height = 220
+width = 440
+height = 280
 placement = "attached"
 position = "auto"
 open_near_click = true

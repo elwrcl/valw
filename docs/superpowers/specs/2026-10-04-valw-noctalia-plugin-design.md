@@ -84,7 +84,7 @@ user text is ever interpolated into them).
 ### 3.2 Toolbar panel
 
 `placement = "attached"`, `position = "auto"`, `open_near_click = true`,
-about 360 × 220.
+about 440 × 280.
 
 - On open (`onOpen`): `valw toolbar --state` → `noctalia.json.decode` →
   render. If valw is missing (`noctalia.commandExists`) or the call fails:
