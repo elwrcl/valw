@@ -194,6 +194,106 @@ pub fn resolve(
     clip(a, b, out, frame_w, frame_h).filter(|r| r.width >= MIN_PIXELS && r.height >= MIN_PIXELS)
 }
 
+/// One output's share of a selection and where it goes in the whole image.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Part {
+    pub output: usize,
+    /// In that output's frame, physical pixels.
+    pub rect: PixelRect,
+    /// Its top-left corner and size in the whole image.
+    pub at: (u32, u32),
+    pub size: (u32, u32),
+}
+
+/// A selection over one or more outputs: its parts and the whole image size.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Span {
+    pub parts: Vec<Part>,
+    pub size: (u32, u32),
+}
+
+impl Span {
+    /// The output and rectangle when the selection is a plain crop of one
+    /// output (today's region shot); `None` when it needs stitching.
+    pub fn single(&self) -> Option<(usize, PixelRect)> {
+        match self.parts.as_slice() {
+            [p] if p.at == (0, 0)
+                && p.size == self.size
+                && (p.rect.width, p.rect.height) == self.size =>
+            {
+                Some((p.output, p.rect))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// The drag from `a` to `b` over `outputs` (each output's geometry and frame
+/// size), at the largest scale among the outputs it covers. `None` for a
+/// click (under [`MIN_PIXELS`]) or a rectangle over no output.
+pub fn span(a: Point, b: Point, outputs: &[(&OutputGeom, (u32, u32))]) -> Option<Span> {
+    let (x0, y0) = (a.x.min(b.x), a.y.min(b.y));
+    let (x1, y1) = (a.x.max(b.x), a.y.max(b.y));
+    let covered: Vec<(usize, PixelRect, f64)> = outputs
+        .iter()
+        .enumerate()
+        .filter_map(|(i, (g, (w, h)))| {
+            let r = clip(a, b, g, *w, *h)?;
+            Some((i, r, *w as f64 / g.width as f64))
+        })
+        .collect();
+    let scale = covered.iter().map(|c| c.2).fold(0.0, f64::max);
+    if scale == 0.0 {
+        return None;
+    }
+    let size = (
+        ((x1 - x0) * scale).ceil() as u32,
+        ((y1 - y0) * scale).ceil() as u32,
+    );
+    if size.0 < MIN_PIXELS || size.1 < MIN_PIXELS {
+        return None;
+    }
+    let parts = covered
+        .into_iter()
+        .map(|(i, rect, own)| {
+            let g = outputs[i].0;
+            let at = (
+                ((x0.max(g.x as f64) - x0) * scale).floor() as u32,
+                ((y0.max(g.y as f64) - y0) * scale).floor() as u32,
+            );
+            let k = scale / own;
+            let part = (
+                ((rect.width as f64 * k).round() as u32).min(size.0 - at.0.min(size.0)),
+                ((rect.height as f64 * k).round() as u32).min(size.1 - at.1.min(size.1)),
+            );
+            Part {
+                output: i,
+                rect,
+                at,
+                size: part,
+            }
+        })
+        .collect();
+    Some(Span { parts, size })
+}
+
+/// The output a global point is over, or the nearest one (`outputs` is never
+/// empty: there is one surface per output).
+pub fn locate(p: Point, outputs: &[(&OutputGeom, (u32, u32))]) -> usize {
+    let distance = |g: &OutputGeom| {
+        let dx = (g.x as f64 - p.x)
+            .max(p.x - (g.x + g.width) as f64)
+            .max(0.0);
+        let dy = (g.y as f64 - p.y)
+            .max(p.y - (g.y + g.height) as f64)
+            .max(0.0);
+        dx * dx + dy * dy
+    };
+    (0..outputs.len())
+        .min_by(|&i, &j| distance(outputs[i].0).total_cmp(&distance(outputs[j].0)))
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,5 +591,123 @@ mod tests {
             Some((pt(90.0, 95.0), pt(110.0, 105.0)))
         );
         assert_eq!(s, Selection::Idle);
+    }
+
+    /// The user's layout: the laptop at the origin, the monitor above it,
+    /// wider and 277 px to the left.
+    fn layout() -> (OutputGeom, OutputGeom) {
+        (
+            out("LVDS-1", 0, 0, 1366, 768),
+            out("HDMI-A-1", -277, -1080, 1920, 1080),
+        )
+    }
+
+    #[test]
+    fn a_span_inside_one_output_is_todays_clip() {
+        let (laptop, monitor) = layout();
+        let outputs = [(&laptop, (1366, 768)), (&monitor, (1920, 1080))];
+        let s = span(p(100.0, 100.0), p(300.0, 250.0), &outputs).unwrap();
+        assert_eq!(s.size, (200, 150));
+        assert_eq!(s.single(), Some((0, rect(100, 100, 200, 150))));
+    }
+
+    #[test]
+    fn a_span_from_the_laptop_up_onto_the_monitor() {
+        let (laptop, monitor) = layout();
+        let outputs = [(&laptop, (1366, 768)), (&monitor, (1920, 1080))];
+        let s = span(p(100.0, 500.0), p(600.0, -300.0), &outputs).unwrap();
+        assert_eq!(s.size, (500, 800));
+        assert_eq!(
+            s.parts,
+            vec![
+                Part {
+                    output: 0,
+                    rect: rect(100, 0, 500, 500),
+                    at: (0, 300),
+                    size: (500, 500)
+                },
+                Part {
+                    output: 1,
+                    rect: rect(377, 780, 500, 300),
+                    at: (0, 0),
+                    size: (500, 300)
+                },
+            ]
+        );
+        assert_eq!(s.single(), None);
+        // The parts meet without a gap or an overlap.
+        assert_eq!(s.parts[1].at.1 + s.parts[1].size.1, s.parts[0].at.1);
+    }
+
+    #[test]
+    fn a_span_over_a_gap_keeps_the_whole_box() {
+        let (laptop, monitor) = layout();
+        let outputs = [(&laptop, (1366, 768)), (&monitor, (1920, 1080))];
+        let s = span(p(-200.0, -200.0), p(300.0, 300.0), &outputs).unwrap();
+        assert_eq!(s.size, (500, 500));
+        assert_eq!(
+            s.parts,
+            vec![
+                Part {
+                    output: 0,
+                    rect: rect(0, 0, 300, 300),
+                    at: (200, 200),
+                    size: (300, 300)
+                },
+                Part {
+                    output: 1,
+                    rect: rect(77, 880, 500, 200),
+                    at: (0, 0),
+                    size: (500, 200)
+                },
+            ]
+        );
+        // One output touched, but the box reaches past it: not a plain crop.
+        let corner = span(p(-50.0, 100.0), p(200.0, 300.0), &outputs).unwrap();
+        assert_eq!(corner.parts.len(), 1);
+        assert_eq!(corner.single(), None);
+    }
+
+    #[test]
+    fn a_span_takes_the_largest_scale() {
+        let a = out("A", 0, 0, 100, 100);
+        let b = out("B", 100, 0, 100, 100);
+        let outputs = [(&a, (200, 200)), (&b, (100, 100))];
+        let s = span(p(50.0, 10.0), p(150.0, 60.0), &outputs).unwrap();
+        assert_eq!(s.size, (200, 100));
+        assert_eq!(
+            s.parts,
+            vec![
+                Part {
+                    output: 0,
+                    rect: rect(100, 20, 100, 100),
+                    at: (0, 0),
+                    size: (100, 100)
+                },
+                Part {
+                    output: 1,
+                    rect: rect(0, 10, 50, 50),
+                    at: (100, 0),
+                    size: (100, 100)
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_tiny_span_is_a_click() {
+        let (laptop, monitor) = layout();
+        let outputs = [(&laptop, (1366, 768)), (&monitor, (1920, 1080))];
+        assert_eq!(span(p(10.0, 10.0), p(11.0, 30.0), &outputs), None);
+    }
+
+    #[test]
+    fn locate_finds_the_output_or_the_nearest() {
+        let (laptop, monitor) = layout();
+        let outputs = [(&laptop, (1366, 768)), (&monitor, (1920, 1080))];
+        assert_eq!(locate(p(500.0, 500.0), &outputs), 0);
+        assert_eq!(locate(p(500.0, -500.0), &outputs), 1);
+        // Left of the laptop, under the monitor: the laptop is 100 px away.
+        assert_eq!(locate(p(-100.0, 300.0), &outputs), 0);
     }
 }
