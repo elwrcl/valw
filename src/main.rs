@@ -84,7 +84,17 @@ enum Command {
         file: PathBuf,
     },
     /// Pick a mode from a floating bar (Cmd+Shift+5).
-    Toolbar,
+    Toolbar {
+        /// Print the remembered choices as one line of JSON (for the Noctalia plugin).
+        #[arg(long, conflicts_with_all = ["set", "run"])]
+        state: bool,
+        /// Change a remembered choice: mode, timer, cursor, preview or sound.
+        #[arg(long, value_name = "KEY=VALUE", conflicts_with = "run")]
+        set: Vec<String>,
+        /// Capture at once with the remembered choices, without the bar.
+        #[arg(long, value_name = "MODE", num_args = 0..=1)]
+        run: Option<Option<toolbar::state::Mode>>,
+    },
     /// The paint shader behind niri's overview (keep it running; see the README).
     Backdrop,
     /// Report what the compositor and system support.
@@ -218,9 +228,24 @@ fn run(cli: Cli) -> Result<()> {
         // Handled in main, before logging starts.
         Command::CheckConfig { file } => config::check(&file),
         Command::ComboDemo => sound::demo(&config::load(&config::default_path())?.sound),
-        Command::Toolbar => {
+        Command::Toolbar { state, set, run } => {
             let config = config::load(&config::default_path())?;
-            let (mode, common) = from_toolbar(toolbar::run(&config)?);
+            let path = toolbar::state::default_path();
+            if state {
+                println!(
+                    "{}",
+                    toolbar::state::to_json(&toolbar::state::load(&path, &config))
+                );
+                return Ok(());
+            }
+            if !set.is_empty() {
+                return toolbar::state::set(&path, &config, &set);
+            }
+            let picked = match run {
+                Some(mode) => toolbar::run_remembered(&config, mode)?,
+                None => toolbar::run(&config)?,
+            };
+            let (mode, common) = from_toolbar(picked);
             capture(mode, common)
         }
         Command::Clipboard => {
@@ -473,6 +498,20 @@ mod tests {
         assert!(!parses(&["edit"]));
         assert!(parses(&["__clipboard"]));
         assert!(parses(&["toolbar"]));
+        assert!(parses(&["toolbar", "--state"]));
+        assert!(parses(&[
+            "toolbar",
+            "--set",
+            "timer=5",
+            "--set",
+            "sound=false"
+        ]));
+        assert!(parses(&["toolbar", "--run"]));
+        assert!(parses(&["toolbar", "--run", "zoom"]));
+        assert!(!parses(&["toolbar", "--run", "video"]));
+        assert!(!parses(&["toolbar", "--state", "--run"]));
+        assert!(!parses(&["toolbar", "--state", "--set", "timer=5"]));
+        assert!(!parses(&["toolbar", "--set", "timer=5", "--run", "zoom"]));
         assert!(parses(&["backdrop"]));
         assert!(parses(&["window", "--pick"]));
         assert!(parses(&["__combo-demo"]));

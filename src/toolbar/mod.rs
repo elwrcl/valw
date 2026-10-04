@@ -5,6 +5,7 @@ pub mod draw;
 pub mod layout;
 pub mod state;
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -44,6 +45,17 @@ pub struct Picked {
     pub sound: bool,
 }
 
+impl From<ToolbarState> for Picked {
+    fn from(s: ToolbarState) -> Self {
+        Picked {
+            mode: s.mode,
+            cursor: s.cursor,
+            preview: s.preview,
+            sound: s.sound,
+        }
+    }
+}
+
 /// Shows the bar, waits for a pick, saves it, runs the countdown.
 pub fn run(config: &Config) -> Result<Picked> {
     let path = state::default_path();
@@ -58,13 +70,33 @@ pub fn run(config: &Config) -> Result<Picked> {
         tracing::warn!("could not remember the toolbar choice: {e:#}");
     }
     countdown(&mut wl, &output, picked.0.timer)?;
-    let s = picked.0;
-    Ok(Picked {
-        mode: picked.1,
-        cursor: s.cursor,
-        preview: s.preview,
-        sound: s.sound,
-    })
+    Ok(Picked::from(picked.0))
+}
+
+/// The remembered state, with `mode` (if given) remembered as the new mode.
+pub fn remember(path: &Path, config: &Config, mode: Option<Mode>) -> ToolbarState {
+    let mut s = state::load(path, config);
+    if let Some(mode) = mode {
+        s.mode = mode;
+        if let Err(e) = state::save(path, &s) {
+            tracing::warn!("could not remember the toolbar choice: {e:#}");
+        }
+    }
+    s
+}
+
+/// `valw toolbar --run`: the remembered options without the bar (for the
+/// Noctalia plugin), then the countdown.
+pub fn run_remembered(config: &Config, mode: Option<Mode>) -> Result<Picked> {
+    let s = remember(&state::default_path(), config, mode);
+    if s.timer > 0 {
+        let mut wl = Wayland::connect()?;
+        let outputs = wl.outputs();
+        anyhow::ensure!(!outputs.is_empty(), "the compositor reported no outputs");
+        let output = outputs[crate::focused_output(&outputs)].clone();
+        countdown(&mut wl, &output, s.timer)?;
+    }
+    Ok(Picked::from(s))
 }
 
 pub struct Toolbar {
@@ -386,5 +418,68 @@ impl Pill {
         if self.is(layer.wl_surface()) {
             self.cancelled = true;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_pick_carries_the_state_options() {
+        let state = ToolbarState {
+            mode: Mode::Window,
+            timer: 5,
+            cursor: true,
+            preview: false,
+            sound: true,
+        };
+        assert_eq!(
+            Picked::from(state),
+            Picked {
+                mode: Mode::Window,
+                cursor: true,
+                preview: false,
+                sound: true,
+            }
+        );
+    }
+
+    #[test]
+    fn run_remembers_a_given_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("toolbar.toml");
+        let config = Config::default();
+        state::save(
+            &path,
+            &ToolbarState {
+                timer: 5,
+                ..state::defaults(&config)
+            },
+        )
+        .unwrap();
+
+        let state = remember(&path, &config, Some(Mode::Zoom));
+        assert_eq!(
+            (state.mode, state.timer),
+            (Mode::Zoom, 5),
+            "the options stay"
+        );
+        assert_eq!(state::load(&path, &config).mode, Mode::Zoom, "saved");
+
+        assert_eq!(
+            remember(&path, &config, None).mode,
+            Mode::Zoom,
+            "no mode: the remembered one"
+        );
+    }
+
+    #[test]
+    fn run_without_a_mode_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("toolbar.toml");
+        let config = Config::default();
+        assert_eq!(remember(&path, &config, None), state::defaults(&config));
+        assert!(!path.exists());
     }
 }
