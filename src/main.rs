@@ -20,6 +20,7 @@ mod selection;
 mod shadow;
 mod sound;
 mod stack;
+mod stitch;
 mod theme;
 mod thumbnail;
 mod toolbar;
