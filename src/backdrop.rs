@@ -1,7 +1,8 @@
 //! `valw backdrop`: the paint shader, slow and calm, behind niri's
 //! overview (niri's `place-within-backdrop` layer rule), coloured from each
 //! output's wallpaper. It draws only when niri asks for frames, so it costs
-//! nothing while the overview is closed.
+//! next to nothing while the overview is closed (niri then sends a hidden
+//! surface about one frame a second).
 
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -27,8 +28,10 @@ use crate::wayland::{State, Wayland};
 
 pub const NAMESPACE: &str = "valw-backdrop";
 const SPEED: f32 = 0.35;
-/// A pause this long means the overview was closed: re-read the wallpaper.
-const PAUSE: Duration = Duration::from_secs(2);
+/// Frame callbacks this far apart mean niri isn't showing the surface: it
+/// throttles hidden surfaces to about one callback a second, and a shown one
+/// gets one every frame.
+const HIDDEN_GAP: Duration = Duration::from_millis(400);
 const EASE: Duration = Duration::from_secs(1);
 /// The paint is soft: drawn at this fraction of the output's resolution and
 /// scaled up by the compositor, it looks the same at a fraction of the cost.
@@ -36,9 +39,29 @@ const RENDER_SCALE: f64 = 0.5;
 /// Draw on every n-th frame callback (30 fps at 60 Hz): the flow is slow.
 const DRAW_EVERY: u32 = 2;
 
-/// Whether to re-read the wallpaper's colours before this frame.
-pub fn should_refresh(last_frame: Option<Instant>, now: Instant) -> bool {
-    last_frame.is_none_or(|t| now.saturating_duration_since(t) > PAUSE)
+/// Tells from the frame callbacks' rhythm when the overview shows the
+/// surface again, the moment to re-read the wallpaper's colours.
+#[derive(Debug, Default)]
+pub struct Visibility {
+    last_frame: Option<Instant>,
+    hidden: bool,
+}
+
+impl Visibility {
+    /// A frame callback at `now`: whether to re-read the wallpaper (the first
+    /// frame, and the first fast one after a hidden spell).
+    pub fn frame(&mut self, now: Instant) -> bool {
+        let gap = self.last_frame.map(|t| now.saturating_duration_since(t));
+        self.last_frame = Some(now);
+        match gap {
+            None => true,
+            Some(gap) if gap > HIDDEN_GAP => {
+                self.hidden = true;
+                false
+            }
+            Some(_) => std::mem::take(&mut self.hidden),
+        }
+    }
 }
 
 /// `from` easing into `to`, `since` after the change started.
@@ -69,7 +92,7 @@ struct Surface {
     name: String,
     scale: f64,
     start: Instant,
-    last_frame: Option<Instant>,
+    visibility: Visibility,
     from: Palette,
     to: Palette,
     changed: Instant,
@@ -137,7 +160,7 @@ pub fn add(state: &mut State, qh: &QueueHandle<State>, output: &WlOutput) {
             name: info.geom.name,
             scale: info.scale,
             start: now,
-            last_frame: None,
+            visibility: Visibility::default(),
             from: palette,
             to: palette,
             changed: now,
@@ -206,12 +229,13 @@ impl Backdrop {
 }
 
 impl Surface {
-    /// Every configure and frame callback: notice a pause (the overview was
-    /// closed) and pick up a new wallpaper palette, then draw or wait as
+    /// Every configure and frame callback: notice the overview showing the
+    /// surface again and pick up a new wallpaper palette, then draw or wait as
     /// the pacer says.
     fn step(&mut self, step: Step, qh: &QueueHandle<State>) {
         let now = Instant::now();
-        if should_refresh(self.last_frame, now) && self.incoming.is_none() {
+        // Every callback counts, drawn or not: skipped frames are not hidden ones.
+        if self.visibility.frame(now) && self.incoming.is_none() {
             let (tx, rx) = mpsc::channel();
             let name = self.name.clone();
             std::thread::spawn(move || {
@@ -233,8 +257,6 @@ impl Surface {
             }
             self.incoming = None;
         }
-        // Every callback counts, drawn or not: skipped frames are not a pause.
-        self.last_frame = Some(now);
         let surface = self.layer.wl_surface();
         match step {
             Step::Idle => {}
@@ -266,12 +288,40 @@ impl Surface {
 mod tests {
     use super::*;
 
+    /// The refresh decisions for callbacks `gaps_ms` apart, after a first one.
+    fn refreshes(gaps_ms: &[u64]) -> Vec<bool> {
+        let mut now = Instant::now();
+        let mut visibility = Visibility::default();
+        let mut out = vec![visibility.frame(now)];
+        for gap in gaps_ms {
+            now += Duration::from_millis(*gap);
+            out.push(visibility.frame(now));
+        }
+        out
+    }
+
     #[test]
-    fn refresh_after_a_pause() {
-        let now = Instant::now();
-        assert!(should_refresh(None, now), "first frame");
-        assert!(!should_refresh(Some(now - Duration::from_secs(1)), now));
-        assert!(should_refresh(Some(now - Duration::from_secs(3)), now));
+    fn refresh_on_the_first_frame_only_while_shown() {
+        assert_eq!(refreshes(&[16, 16, 16]), [true, false, false, false]);
+    }
+
+    #[test]
+    fn refresh_when_frames_speed_up_after_niri_throttled_them() {
+        // Hidden, niri sends about one callback a second: no refresh then
+        // (that would read the wallpaper every second), one when the
+        // overview shows the surface again, and none after.
+        assert_eq!(
+            refreshes(&[16, 995, 995, 995, 600, 16, 16, 16]),
+            [true, false, false, false, false, false, true, false, false]
+        );
+    }
+
+    #[test]
+    fn a_long_silence_also_counts_as_hidden() {
+        assert_eq!(
+            refreshes(&[16, 3000, 16, 16]),
+            [true, false, false, true, false]
+        );
     }
 
     #[test]
