@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
     Screen,
@@ -101,6 +101,62 @@ pub fn save(path: &Path, state: &ToolbarState) -> Result<()> {
     crate::output::write_atomic(path, text.as_bytes())
 }
 
+/// One line of JSON for the Noctalia plugin: the state and the timer choices.
+pub fn to_json(state: &ToolbarState) -> String {
+    serde_json::json!({
+        "mode": state.mode,
+        "timer": state.timer,
+        "cursor": state.cursor,
+        "preview": state.preview,
+        "sound": state.sound,
+        "timers": TIMERS,
+    })
+    .to_string()
+}
+
+/// `state` with every `KEY=VALUE` applied in order; the first bad pair is
+/// an error naming it.
+pub fn apply_sets(mut state: ToolbarState, sets: &[String]) -> Result<ToolbarState> {
+    for pair in sets {
+        let Some((key, value)) = pair.split_once('=') else {
+            bail!("expected KEY=VALUE, not {pair:?}");
+        };
+        let flag = || match value {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            _ => Err(anyhow::anyhow!(
+                "{key} must be true or false, not {value:?}"
+            )),
+        };
+        match key {
+            "mode" => {
+                state.mode = <Mode as clap::ValueEnum>::from_str(value, false).map_err(|_| {
+                    anyhow::anyhow!("mode must be screen, window, region or zoom, not {value:?}")
+                })?;
+            }
+            "timer" => {
+                state.timer = value
+                    .parse()
+                    .ok()
+                    .filter(|t| TIMERS.contains(t))
+                    .with_context(|| format!("timer must be 0, 5 or 10, not {value:?}"))?;
+            }
+            "cursor" => state.cursor = flag()?,
+            "preview" => state.preview = flag()?,
+            "sound" => state.sound = flag()?,
+            _ => bail!("unknown toolbar key {key:?} (mode, timer, cursor, preview or sound)"),
+        }
+    }
+    Ok(state)
+}
+
+/// `valw toolbar --set`: `sets` applied to the remembered state and saved;
+/// nothing changes if any pair is bad.
+pub fn set(path: &Path, config: &Config, sets: &[String]) -> Result<()> {
+    let state = apply_sets(load(path, config), sets)?;
+    save(path, &state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,5 +230,105 @@ mod tests {
         assert_eq!(state.mode, Mode::Window);
         assert_eq!(state.timer, 0);
         assert_eq!(state.preview, config.preview.enabled);
+    }
+
+    #[test]
+    fn json_for_the_plugin() {
+        let state = ToolbarState {
+            mode: Mode::Zoom,
+            timer: 5,
+            cursor: true,
+            preview: false,
+            sound: true,
+        };
+        let text = to_json(&state);
+        assert!(!text.contains('\n'), "one line");
+        let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "mode": "zoom",
+                "timer": 5,
+                "cursor": true,
+                "preview": false,
+                "sound": true,
+                "timers": [0, 5, 10],
+            })
+        );
+    }
+
+    #[test]
+    fn sets_apply_every_key_in_order() {
+        let start = defaults(&Config::default());
+        let sets: Vec<String> = [
+            "mode=window",
+            "timer=10",
+            "cursor=true",
+            "preview=false",
+            "sound=false",
+        ]
+        .map(String::from)
+        .into();
+        assert_eq!(
+            apply_sets(start, &sets).unwrap(),
+            ToolbarState {
+                mode: Mode::Window,
+                timer: 10,
+                cursor: true,
+                preview: false,
+                sound: false,
+            }
+        );
+        let twice = ["timer=5".to_string(), "timer=0".to_string()];
+        assert_eq!(
+            apply_sets(start, &twice).unwrap().timer,
+            0,
+            "the last one wins"
+        );
+    }
+
+    #[test]
+    fn bad_sets_are_rejected_by_name() {
+        let start = defaults(&Config::default());
+        for (pair, message) in [
+            ("colour=red", "unknown toolbar key \"colour\""),
+            ("mode=video", "mode must be screen, window, region or zoom"),
+            ("timer=7", "timer must be 0, 5 or 10"),
+            ("timer=soon", "timer must be 0, 5 or 10"),
+            ("cursor=maybe", "cursor must be true or false"),
+            ("cursor", "expected KEY=VALUE"),
+        ] {
+            let err = format!("{:#}", apply_sets(start, &[pair.to_string()]).unwrap_err());
+            assert!(err.contains(message), "{pair}: {err}");
+        }
+    }
+
+    #[test]
+    fn set_writes_all_or_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("valw/toolbar.toml");
+        let config = Config::default();
+        let bad = ["timer=5".to_string(), "mode=video".to_string()];
+        assert!(set(&path, &config, &bad).is_err());
+        assert!(!path.exists(), "nothing written");
+
+        let good = ["timer=5".to_string(), "sound=false".to_string()];
+        set(&path, &config, &good).unwrap();
+        let state = load(&path, &config);
+        assert_eq!(
+            (state.timer, state.sound, state.mode),
+            (5, false, Mode::Region)
+        );
+
+        std::fs::write(&path, "not toml [").unwrap();
+        set(&path, &config, &["cursor=true".to_string()]).unwrap();
+        assert_eq!(
+            load(&path, &config),
+            ToolbarState {
+                cursor: true,
+                ..defaults(&config)
+            },
+            "a broken file is replaced, starting from the defaults"
+        );
     }
 }
