@@ -189,8 +189,9 @@ pub struct Part {
     pub output: usize,
     /// In that output's frame, physical pixels.
     pub rect: PixelRect,
-    /// Its top-left corner and size in the whole image.
-    pub at: (u32, u32),
+    /// Its top-left corner and size in the whole image (a corner can sit a
+    /// pixel left of or above the image when scales differ).
+    pub at: (i64, i64),
     pub size: (u32, u32),
 }
 
@@ -220,6 +221,12 @@ impl Span {
 /// The drag from `a` to `b` over `outputs` (each output's geometry and frame
 /// size), at the largest scale among the outputs it covers. `None` for a
 /// click (under [`MIN_PIXELS`]) or a rectangle over no output.
+///
+/// A box inside one output is that output's plain crop, pixel for pixel.
+/// Otherwise the image lies on the physical pixel grid at that scale: its
+/// edges are the corners rounded outwards, and each part sits where its own
+/// pixels fall on that grid, so neighbouring parts meet without a gap or an
+/// overlap even when the corners are fractional (as pointer positions are).
 pub fn span(a: Point, b: Point, outputs: &[(&OutputGeom, (u32, u32))]) -> Option<Span> {
     let (x0, y0) = (a.x.min(b.x), a.y.min(b.y));
     let (x1, y1) = (a.x.max(b.x), a.y.max(b.y));
@@ -231,13 +238,36 @@ pub fn span(a: Point, b: Point, outputs: &[(&OutputGeom, (u32, u32))]) -> Option
             Some((i, r, *w as f64 / g.width as f64))
         })
         .collect();
+    let inside = |g: &OutputGeom| {
+        x0 >= g.x as f64
+            && y0 >= g.y as f64
+            && x1 <= (g.x + g.width) as f64
+            && y1 <= (g.y + g.height) as f64
+    };
+    if let Some(&(i, rect, _)) = covered.iter().find(|c| inside(outputs[c.0].0)) {
+        let size = (rect.width, rect.height);
+        if size.0 < MIN_PIXELS || size.1 < MIN_PIXELS {
+            return None;
+        }
+        let part = Part {
+            output: i,
+            rect,
+            at: (0, 0),
+            size,
+        };
+        return Some(Span {
+            parts: vec![part],
+            size,
+        });
+    }
     let scale = covered.iter().map(|c| c.2).fold(0.0, f64::max);
     if scale == 0.0 {
         return None;
     }
+    let (left, top) = ((x0 * scale).floor(), (y0 * scale).floor());
     let size = (
-        ((x1 - x0) * scale).ceil() as u32,
-        ((y1 - y0) * scale).ceil() as u32,
+        ((x1 * scale).ceil() - left) as u32,
+        ((y1 * scale).ceil() - top) as u32,
     );
     if size.0 < MIN_PIXELS || size.1 < MIN_PIXELS {
         return None;
@@ -246,20 +276,20 @@ pub fn span(a: Point, b: Point, outputs: &[(&OutputGeom, (u32, u32))]) -> Option
         .into_iter()
         .map(|(i, rect, own)| {
             let g = outputs[i].0;
-            let at = (
-                ((x0.max(g.x as f64) - x0) * scale).floor() as u32,
-                ((y0.max(g.y as f64) - y0) * scale).floor() as u32,
-            );
             let k = scale / own;
-            let part = (
-                ((rect.width as f64 * k).round() as u32).min(size.0 - at.0.min(size.0)),
-                ((rect.height as f64 * k).round() as u32).min(size.1 - at.1.min(size.1)),
+            let at = (
+                (g.x as f64 * scale + rect.x as f64 * k).round() as i64 - left as i64,
+                (g.y as f64 * scale + rect.y as f64 * k).round() as i64 - top as i64,
+            );
+            let size = (
+                (rect.width as f64 * k).round() as u32,
+                (rect.height as f64 * k).round() as u32,
             );
             Part {
                 output: i,
                 rect,
                 at,
-                size: part,
+                size,
             }
         })
         .collect();
@@ -626,7 +656,7 @@ mod tests {
         );
         assert_eq!(s.single(), None);
         // The parts meet without a gap or an overlap.
-        assert_eq!(s.parts[1].at.1 + s.parts[1].size.1, s.parts[0].at.1);
+        assert_eq!(s.parts[1].at.1 + s.parts[1].size.1 as i64, s.parts[0].at.1);
     }
 
     #[test]
@@ -682,6 +712,55 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn a_fractional_box_on_one_output_is_its_plain_crop() {
+        let (laptop, monitor) = layout();
+        let outputs = [(&laptop, (1366, 768)), (&monitor, (1920, 1080))];
+        let (a, b) = (p(100.6, 100.6), p(300.2, 250.2));
+        let s = span(a, b, &outputs).unwrap();
+        let crop = clip(a, b, &laptop, 1366, 768).unwrap();
+        assert_eq!(s.single(), Some((0, crop)));
+        assert_eq!(s.size, (crop.width, crop.height));
+        // A 1.25-scale output: the crop is what clip gives, not a resampled one.
+        let o = out("A", 0, 0, 1000, 800);
+        let scaled = [(&o, (1250, 1000))];
+        let (a, b) = (p(101.0, 101.0), p(301.0, 251.0));
+        assert_eq!(
+            span(a, b, &scaled).unwrap().single(),
+            Some((0, clip(a, b, &o, 1250, 1000).unwrap()))
+        );
+    }
+
+    #[test]
+    fn fractional_seams_meet_exactly_and_fill_the_image() {
+        let (laptop, monitor) = layout();
+        let outputs = [(&laptop, (1366, 768)), (&monitor, (1920, 1080))];
+        for (top, bottom) in [(-300.4, 500.6), (-300.6, 500.6), (-300.5, 500.2)] {
+            let s = span(p(100.3, bottom), p(600.7, top), &outputs).unwrap();
+            let (laptop_part, monitor_part) = (&s.parts[0], &s.parts[1]);
+            assert_eq!(monitor_part.at.1, 0, "{top}: the monitor starts the image");
+            assert_eq!(
+                monitor_part.at.1 + monitor_part.size.1 as i64,
+                laptop_part.at.1,
+                "{top}: no doubled or missing row at the seam"
+            );
+            assert_eq!(
+                laptop_part.at.1 + laptop_part.size.1 as i64,
+                s.size.1 as i64,
+                "{top}: the last row is covered"
+            );
+            assert_eq!(laptop_part.size.0, s.size.0, "{top}: full width");
+        }
+        // Mixed scales with a fractional corner: the parts tile the width.
+        let a = out("A", 0, 0, 100, 100);
+        let b = out("B", 100, 0, 100, 100);
+        let mixed = [(&a, (200, 200)), (&b, (100, 100))];
+        let s = span(p(50.3, 10.0), p(150.7, 60.0), &mixed).unwrap();
+        assert_eq!(s.parts[0].at.0, 0);
+        assert_eq!(s.parts[0].at.0 + s.parts[0].size.0 as i64, s.parts[1].at.0);
+        assert_eq!(s.parts[1].at.0 + s.parts[1].size.0 as i64, s.size.0 as i64);
     }
 
     #[test]

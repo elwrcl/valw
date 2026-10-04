@@ -20,7 +20,7 @@ pub fn stitch(frames: &[Frame], span: &Span) -> RgbaImage {
                 imageops::FilterType::Triangle,
             );
         }
-        imageops::replace(&mut image, &crop, part.at.0 as i64, part.at.1 as i64);
+        imageops::replace(&mut image, &crop, part.at.0, part.at.1);
     }
     image
 }
