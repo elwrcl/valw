@@ -238,8 +238,8 @@ impl Zoom {
             let p = (event.position.0 * self.ratio, event.position.1 * self.ratio);
             match event.kind {
                 PointerEventKind::Enter { serial } => {
-                    if let Some(cursor) = cursor {
-                        cursor.set_shape(serial, Shape::Default);
+                    if let Some(device) = cursor {
+                        device.set_shape(serial, self::cursor(self.panning.is_some()));
                     }
                     self.pointer = p;
                 }
@@ -249,8 +249,8 @@ impl Zoom {
                     ..
                 } => {
                     self.panning = Some(p);
-                    if let Some(cursor) = cursor {
-                        cursor.set_shape(serial, Shape::Grabbing);
+                    if let Some(device) = cursor {
+                        device.set_shape(serial, self::cursor(true));
                     }
                 }
                 PointerEventKind::Release {
@@ -259,8 +259,8 @@ impl Zoom {
                     ..
                 } => {
                     self.panning = None;
-                    if let Some(cursor) = cursor {
-                        cursor.set_shape(serial, Shape::Default);
+                    if let Some(device) = cursor {
+                        device.set_shape(serial, self::cursor(false));
                     }
                 }
                 PointerEventKind::Motion { .. } => {
@@ -320,9 +320,25 @@ impl Zoom {
     }
 }
 
+/// The pointer over a zoom: a magnifier, so it reads as zoom mode, and a
+/// grabbing hand while dragging the view.
+fn cursor(panning: bool) -> Shape {
+    if panning {
+        Shape::Grabbing
+    } else {
+        Shape::ZoomIn
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cursor_says_zoom_and_grabs_while_dragging() {
+        assert_eq!(cursor(false), Shape::ZoomIn);
+        assert_eq!(cursor(true), Shape::Grabbing);
+    }
 
     #[test]
     fn keys() {

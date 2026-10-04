@@ -54,6 +54,7 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 ## Zoom (Phase 4)
 
 - [ ] `valw zoom` → the focused output freezes at 1×; Esc and `q` leave, nothing saved, exit 0, thumbnails come back.
+- [ ] The pointer is a magnifier (zoom-in) over the zoom, a grabbing hand while dragging, the magnifier again after.
 - [ ] Wheel zooms towards the pointer (the point under it stays put), smoothly, up to 32×; pixels stay crisp.
 - [ ] Touchpad scrolling zooms smoothly too.
 - [ ] Left drag pans 1:1 and never shows anything outside the screenshot; the cursor turns into a grabbing hand.
