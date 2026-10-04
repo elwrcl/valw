@@ -84,7 +84,7 @@ impl Default for Sound {
     fn default() -> Self {
         Self {
             enabled: true,
-            volume: 0.6,
+            volume: 0.9,
             combo_reset_secs: 5,
         }
     }
@@ -292,7 +292,7 @@ mod tests {
     fn sound_defaults_and_bounds() {
         let s = Config::default().sound;
         assert!(s.enabled);
-        assert_eq!((s.volume, s.combo_reset_secs), (0.6, 5));
+        assert_eq!((s.volume, s.combo_reset_secs), (0.9, 5));
         for bad in ["volume = 1.5", "volume = nan", "volume = -0.1"] {
             let err = parse(&format!("[sound]\n{bad}\n")).unwrap_err();
             assert_eq!(

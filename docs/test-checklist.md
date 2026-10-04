@@ -142,7 +142,7 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - [ ] Region: while dragging, a `W × H` label follows the pointer (physical pixels, same as the saved PNG), flipping near the edges.
 - [ ] Shift locks the dimension you move first; Alt grows from the centre; Space held moves the selection, and after letting go resizing continues without a jump; Space before a drag still switches to window mode.
 - [ ] `[capture] window_shadow = true`: window shots get a soft shadow following the rounded corners; preview, clipboard and file all have it.
-- [ ] Shots in quick succession play sounds 1 → 5 getting faster and brighter, then 6, 7, 6, 7 rising endlessly; after a 5 s pause it starts at 1 again. `valw __combo-demo` plays the whole sequence for tuning.
+- [ ] Each shot is a two-hit "ka-chunk" (macOS-like) with a metallic clatter that grows from shot 2; shots in quick succession play sounds 1 → 5 getting faster and brighter, then 6, 7, 6, 7 (a climbing bell arpeggio over a glide) rising endlessly; every shot about as loud; after a 5 s pause it starts at 1 again. `valw __combo-demo` plays the whole sequence for tuning.
 - [ ] `[sound] enabled = false`, `volume`, `combo_reset_secs` take effect; the toolbar's Play sound option overrides the config; no `pw-play` → no sound, capture still works (warning in the log).
 
 ### Known minors (deferred from the polish review)
@@ -152,7 +152,6 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - `__combo-demo` and a capture regenerating the same WAV at once can race on the temp file (one silent shot).
 - Without `XDG_RUNTIME_DIR` the sound cache and combo state in `/tmp` are shared between users.
 - `pipewire` on the wrapper's PATH adds its whole closure to the package.
-- Tuning by ear: shots 6–7 are about 9–10 dB louder than 1–5; adjust with `__combo-demo`.
 
 ## home-manager module
 

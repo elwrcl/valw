@@ -116,7 +116,7 @@ backend = "builtin"   # or "satty"
 
 [sound]
 enabled = true
-volume = 0.6
+volume = 0.9
 combo_reset_secs = 5
 ```
 
