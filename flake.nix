@@ -1,5 +1,5 @@
 {
-  description = "valw, macOS-style screenshots for niri";
+  description = "valw desktop helper";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";

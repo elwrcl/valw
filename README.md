@@ -1,19 +1,16 @@
 # valw
 
-macOS-style screenshots for [niri](https://github.com/YaLTeR/niri) on
-Wayland: the whole screen, a region, a window, a zoomable freeze-frame, a
-Cmd+Shift+5-style toolbar, a floating preview you can drag into other apps,
-and a built-in markup editor. Written in Rust, packaged with Nix.
+valw is desktop helper for 3N' [nixos] (https://nixos.org/) [niri](https://github.com/YaLTeR/niri) [noctalia](https://github.com/noctalia-dev/noctalia)
 
-## Install
+## installation
 
-Run it once:
+run first:
 
 ```sh
 nix run git+https://git.userevolt.app/elars/valw -- doctor
 ```
 
-As a package from the flake (`packages.<system>.default`), or with the
+use as package from the flake (`packages.<system>.default`), or with the
 home-manager module:
 
 ```nix
@@ -35,13 +32,7 @@ inputs.valw.url = "git+https://git.userevolt.app/elars/valw";
   };
 }
 ```
-
-`settings` becomes `~/.config/valw/config.toml`. valw checks it while the
-configuration is built, so a typo or a bad value fails the rebuild instead
-of surprising you later. The toolbar's remembered choices live in
-`~/.local/state/valw/toolbar.toml` and stay writable.
-
-## Bind it in niri
+## binding on niri
 
 ```kdl
 binds {
@@ -53,7 +44,7 @@ binds {
 }
 ```
 
-## Commands
+## commands
 
 | Command | What it does |
 |---|---|
@@ -69,45 +60,8 @@ binds {
 Capture commands take `--clipboard-only`, `-o PATH` (`-` for stdout),
 `--delay SECS`, `--cursor` and `--no-preview`.
 
-## The overview backdrop
 
-`valw backdrop` draws a slow liquid-paint background, coloured from the
-wallpaper (via Noctalia, if it runs), behind niri's overview. It only draws
-while the overview shows it. Start it with niri and place it in the
-backdrop:
-
-```kdl
-spawn-at-startup "valw" "backdrop"
-
-layer-rule {
-    match namespace="^valw-backdrop$"
-    place-within-backdrop true
-}
-```
-
-With Noctalia, turn its own backdrop off (`[backdrop] enabled = false`).
-Colours elsewhere (the region dim, the window picker's fallback) follow
-Noctalia's current community palette when there is one.
-
-## Noctalia
-
-With [Noctalia](https://noctalia.dev), valw comes as a plugin: a camera
-button on the bar (left click: the toolbar, right click: a region shot),
-the toolbar as a Noctalia panel and a control-center tile. Noctalia draws
-them, so they follow your Noctalia theme.
-
-```nix
-programs.valw.noctalia.enable = true;
-```
-
-Then enable `elars/valw` in Noctalia, add a widget of type `elars/valw:bar`
-to a bar, and bind the toolbar:
-
-```kdl
-Mod+Shift+T { spawn "noctalia" "msg" "panel-toggle" "elars/valw:toolbar"; }
-```
-
-## Configuration
+## configuration
 
 Every key is optional; these are the defaults.
 
@@ -130,7 +84,7 @@ scroll_step = 1.15
 flashlight_radius = 180
 
 [editor]
-backend = "builtin"   # or "satty", or "noctalia" (its annotator)
+backend = "builtin"   # or "satty","noctalia" choose which one is for you.
 
 [sound]
 enabled = true
@@ -138,4 +92,4 @@ volume = 0.9
 combo_reset_secs = 5
 ```
 
-Logs are in `~/.local/state/valw/logs/`.
+logs are in `~/.local/state/valw/logs/`.

@@ -10,7 +10,6 @@
     let
       cfg = config.programs.valw;
       toml = pkgs.formats.toml { };
-      # valw checks its own config: a typo or a bad value fails the build.
       checked =
         settings:
         let

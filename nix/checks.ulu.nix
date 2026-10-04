@@ -9,9 +9,6 @@
     }:
     let
       valw = self'.packages.default;
-
-      # The home-manager module, evaluated with stand-ins for the two
-      # home-manager options it sets (no home-manager input needed).
       homeModule =
         valwConfig:
         (lib.evalModules {
@@ -44,7 +41,6 @@
           ];
         }).config;
 
-      # Reuses the package's vendored dependencies, runs `cmd` instead of the build.
       cargoCheck =
         name: tools: cmd:
         valw.overrideAttrs (old: {
@@ -52,7 +48,6 @@
           nativeBuildInputs = old.nativeBuildInputs ++ tools;
           buildPhase = cmd;
           installPhase = "touch $out";
-          # The package patches its binary's RUNPATH; a check has no binary.
           postFixup = "";
         });
     in
@@ -100,9 +95,6 @@
             }/testBuildFailure.log
             touch $out
           '';
-        # The plugin as packaged: manifest, every entry present, Luau that
-        # compiles, translations that parse; and its logic against stubbed
-        # Noctalia globals.
         noctalia-plugin =
           pkgs.runCommand "valw-noctalia-plugin"
             {
@@ -135,8 +127,6 @@
           touch $out
         '';
 
-        # Runs the real screencopy path against a headless sway. This is
-        # wlroots, not niri, but it catches capture and format bugs on every build.
         headless =
           pkgs.runCommand "valw-headless"
             {
@@ -168,15 +158,10 @@
               valw doctor | tee doctor.txt
               ! grep -q '^fail' doctor.txt
 
-              # Through a pipe: the clipboard child must not keep it open.
-              # The timeout covers the reader too; the child is in its own
-              # session, so bounding valw alone would not catch a leak.
               timeout 10 sh -c 'valw screen -o - | cat > shot.png'
               file shot.png | tee file.txt
               grep -q 'PNG image data, 1280 x 720' file.txt
 
-              # Preview. The background is solid black, so a thumbnail in the
-              # bottom-right corner shows up as more than one colour there.
               mkdir -p $HOME/.config/valw
               printf '[preview]\ntimeout_secs = 2\n' > $HOME/.config/valw/config.toml
               socket=$XDG_RUNTIME_DIR/valw.sock

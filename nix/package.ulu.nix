@@ -14,9 +14,7 @@
             !(builtins.elem (baseNameOf path) [
               ".direnv"
               ".jj"
-              # Plan ledgers and review notes; not part of the build.
               ".superpowers"
-              # Documentation: a doc change shouldn't rebuild the binary.
               "docs"
               "README.md"
               "result"
@@ -35,11 +33,7 @@
           pkgs.wayland
         ];
 
-        # Tests run through `nix flake check` instead.
         doCheck = false;
-
-        # Clicking a preview opens Satty if configured. --suffix keeps a user's own Satty first.
-        # The editor embeds DejaVu Sans Bold; its licence wants the notice shipped.
         postInstall = ''
           wrapProgram $out/bin/valw --suffix PATH : ${
             lib.makeBinPath [
@@ -48,14 +42,11 @@
             ]
           }
           install -Dm644 assets/fonts/LICENSE-DejaVu $out/share/licenses/valw/LICENSE-DejaVu
-          # The Noctalia plugin (programs.valw.noctalia), without its tests.
           mkdir -p $out/share/valw
           cp -r noctalia-plugin $out/share/valw/noctalia-plugin
           rm -r $out/share/valw/noctalia-plugin/tests
         '';
 
-        # dlopen()ed at run time: libwayland (winit, valw), libxkbcommon (winit),
-        # libEGL (zoom, editor; Mesa's drivers come from the system).
         postFixup = ''
           patchelf --add-rpath ${
             lib.makeLibraryPath [
@@ -67,7 +58,7 @@
         '';
 
         meta = {
-          description = "macOS-style screenshots for niri";
+          description = "desktop helper";
           mainProgram = "valw";
           platforms = lib.platforms.linux;
         };
