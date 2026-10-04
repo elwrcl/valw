@@ -183,17 +183,6 @@ pub fn clip(a: Point, b: Point, out: &OutputGeom, frame_w: u32, frame_h: u32) ->
     })
 }
 
-/// Like [`clip`], but treats anything under [`MIN_PIXELS`] as a click.
-pub fn resolve(
-    a: Point,
-    b: Point,
-    out: &OutputGeom,
-    frame_w: u32,
-    frame_h: u32,
-) -> Option<PixelRect> {
-    clip(a, b, out, frame_w, frame_h).filter(|r| r.width >= MIN_PIXELS && r.height >= MIN_PIXELS)
-}
-
 /// One output's share of a selection and where it goes in the whole image.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Part {
@@ -412,11 +401,12 @@ mod tests {
     #[test]
     fn click_is_not_a_selection() {
         let o = out("A", 0, 0, 1920, 1080);
-        assert_eq!(resolve(p(10.0, 10.0), p(10.0, 10.0), &o, 1920, 1080), None);
-        assert_eq!(resolve(p(10.0, 10.0), p(11.0, 30.0), &o, 1920, 1080), None);
+        let outputs = [(&o, (1920, 1080))];
+        assert_eq!(span(p(10.0, 10.0), p(10.0, 10.0), &outputs), None);
+        assert_eq!(span(p(10.0, 10.0), p(11.0, 30.0), &outputs), None);
         assert_eq!(
-            resolve(p(10.0, 10.0), p(12.0, 12.0), &o, 1920, 1080),
-            Some(rect(10, 10, 2, 2))
+            span(p(10.0, 10.0), p(12.0, 12.0), &outputs).and_then(|s| s.single()),
+            Some((0, rect(10, 10, 2, 2)))
         );
     }
 

@@ -147,6 +147,8 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 - [ ] Each shot is a two-hit "ka-chunk" (macOS-like) with a metallic clatter that grows from shot 2; shots in quick succession play sounds 1 → 5 getting faster and brighter, then 6, 7, 6, 7 (a climbing bell arpeggio over a glide) rising endlessly; every shot about as loud; after a 5 s pause it starts at 1 again. `valw __combo-demo` plays the whole sequence for tuning.
 - [ ] `[sound] enabled = false`, `volume`, `combo_reset_secs` take effect; the toolbar's Play sound option overrides the config; no `pw-play` → no sound, capture still works (warning in the log).
 
+- [ ] Region across monitors: drag from the laptop up onto the monitor and back; each screen shows its part, the label shows the whole size on the screen under the pointer; Shift, Alt and Space work across the edge; the PNG is the whole rectangle, seams exact, parts over no screen transparent; the preview appears on the screen where you let go; a box on one screen is exactly as before.
+
 ### Known minors (deferred from the polish review)
 
 - Releasing Shift mid-drag only updates the rectangle on the next pointer motion.

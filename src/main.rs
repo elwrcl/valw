@@ -310,6 +310,10 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
                     let source = frames[i].output.name.clone();
                     (vec![(frames[i].to_rgba(r), None)], 0, source)
                 }
+                region::Choice::Span(span, on) => {
+                    let source = frames[on].output.name.clone();
+                    (vec![(stitch::stitch(&frames, &span), None)], 0, source)
+                }
                 region::Choice::Window => {
                     drop(frames);
                     windowed = true;
