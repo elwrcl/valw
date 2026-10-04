@@ -43,7 +43,8 @@ opens the bar as today.
   writes them all at once (atomic write, the same file and format the bar
   saves). Keys: `mode` (`screen|window|region|zoom`), `timer` (one of
   `TIMERS`), `cursor`, `preview`, `sound` (`true|false`). Any unknown key
-  or bad value: an error naming it, exit 2, nothing written.
+  or bad value: an error naming it, exit 1 (like every valw error),
+  nothing written.
 - `valw toolbar --run [MODE]`: captures at once with the remembered
   options, exactly as choosing that mode in the bar would (timer as the
   delay, the `toolbar_cursor`/`toolbar_preview`/`toolbar_sound`
@@ -131,8 +132,9 @@ All visible strings through `noctalia.tr`, with `en.json` and `tr.json`.
 ## 5. Wiring (copland, with the user's approval, at the end)
 
 - `programs.valw.noctalia.enable = true`.
-- Noctalia: `"elars/valw"` in `plugins.enabled`; the widget
-  (`"elars/valw:bar"`) in the bar's `end` list.
+- Noctalia: `"elars/valw"` in `plugins.enabled`; a widget instance
+  `widget.valw = { type = "elars/valw:bar"; }` and `"valw"` in the bar's
+  `end` list (the way copland places `notes` and `recorder`).
 - niri: `Mod+Shift+T` → `noctalia msg panel-toggle elars/valw:toolbar`.
 
 ## 6. Structure
