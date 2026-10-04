@@ -183,9 +183,8 @@ enum Mode {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    // home-manager runs this in the build sandbox: no home, no logs, quiet.
-    if let Command::CheckConfig { file } = &cli.command {
-        return match config::check(file) {
+    if keeps_no_log(&cli.command) {
+        return match run(cli) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprint!("{}", error::render(&e, None));
@@ -215,6 +214,17 @@ fn main() -> ExitCode {
     }
 }
 
+/// Commands that start no run log: home-manager's config check (in the
+/// build sandbox: no home), and the Noctalia plugin's toolbar queries, which
+/// run on every panel use and would push the capture logs out.
+fn keeps_no_log(command: &Command) -> bool {
+    match command {
+        Command::CheckConfig { .. } => true,
+        Command::Toolbar { state, set, .. } => *state || !set.is_empty(),
+        _ => false,
+    }
+}
+
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Doctor => doctor::run(),
@@ -225,7 +235,6 @@ fn run(cli: Cli) -> Result<()> {
         Command::Window { pick, common } => capture(Mode::Window { pick }, common),
         Command::Zoom { common } => capture(Mode::Zoom, common),
         Command::Edit { file } => editor::run(&file),
-        // Handled in main, before logging starts.
         Command::CheckConfig { file } => config::check(&file),
         Command::ComboDemo => sound::demo(&config::load(&config::default_path())?.sound),
         Command::Toolbar { state, set, run } => {
@@ -517,6 +526,20 @@ mod tests {
         assert!(parses(&["__combo-demo"]));
         assert!(parses(&["__check-config", "c.toml"]));
         assert!(!parses(&["__check-config"]));
+    }
+
+    #[test]
+    fn plugin_queries_keep_no_run_log() {
+        let quiet = |args: &[&str]| {
+            let cli = Cli::try_parse_from(std::iter::once("valw").chain(args.iter().copied()));
+            keeps_no_log(&cli.unwrap().command)
+        };
+        assert!(quiet(&["toolbar", "--state"]));
+        assert!(quiet(&["toolbar", "--set", "timer=5"]));
+        assert!(quiet(&["__check-config", "c.toml"]));
+        assert!(!quiet(&["toolbar"]));
+        assert!(!quiet(&["toolbar", "--run"]));
+        assert!(!quiet(&["region"]));
     }
 
     #[test]
