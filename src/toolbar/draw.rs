@@ -7,7 +7,7 @@ use crate::toolbar::layout::{Layout, MenuItem, Rect, Target};
 use crate::toolbar::state::ToolbarState;
 
 pub const LABEL: f32 = 13.0;
-const RADIUS: f32 = 12.0;
+pub const RADIUS: f32 = 12.0;
 const BACKGROUND: [u8; 4] = [0x1c, 0x1c, 0x1e, 230];
 const SELECTED: [u8; 4] = [255, 255, 255, 46];
 const HOVER: [u8; 4] = [255, 255, 255, 26];
@@ -130,8 +130,9 @@ pub fn bar(
     p
 }
 
-/// The countdown pill: a rounded background with `text` centred.
-pub fn pill(size: (u32, u32), scale: f32, s: &str) -> Pixmap {
+/// A pill: a background with corners of `radius` and `text` centred (the
+/// countdown is rounded, the region's size label square).
+pub fn pill(size: (u32, u32), scale: f32, s: &str, radius: f32) -> Pixmap {
     let mut p = Pixmap::new(size.0.max(1), size.1.max(1)).expect("the pill has a size");
     let r = Rect {
         x: 0.0,
@@ -139,7 +140,7 @@ pub fn pill(size: (u32, u32), scale: f32, s: &str) -> Pixmap {
         w: size.0 as f32 / scale,
         h: size.1 as f32 / scale,
     };
-    rounded(&mut p, r, RADIUS, BACKGROUND, scale);
+    rounded(&mut p, r, radius, BACKGROUND, scale);
     let left = (r.w - measure(s)) / 2.0;
     label(&mut p, r, left, s, scale);
     p
@@ -221,8 +222,15 @@ mod tests {
     }
 
     #[test]
+    fn a_square_pill_fills_its_corners() {
+        let corner = |p: &Pixmap| p.pixel(0, 0).unwrap().alpha();
+        assert_eq!(corner(&pill((72, 40), 1.0, "5", RADIUS)), 0, "rounded");
+        assert!(corner(&pill((72, 40), 1.0, "5", 0.0)) > 200, "square");
+    }
+
+    #[test]
     fn the_pill_shows_its_text() {
-        let p = pill((72, 40), 1.0, "5");
+        let p = pill((72, 40), 1.0, "5", RADIUS);
         let lit = p
             .pixels()
             .iter()

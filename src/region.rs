@@ -178,7 +178,8 @@ impl Surface {
                 ((crate::toolbar::draw::measure(&text) + 12.0) as f64 * scale).ceil() as u32,
                 ((crate::toolbar::draw::LABEL * 1.2 + 12.0) as f64 * scale).ceil() as u32,
             );
-            let pill = crate::toolbar::draw::pill(size, scale as f32, &text);
+            // Square corners: sharp, like the rest of the shell.
+            let pill = crate::toolbar::draw::pill(size, scale as f32, &text, 0.0);
             let at = render::label_origin(
                 (px * scale, py * scale),
                 (pill.width(), pill.height()),

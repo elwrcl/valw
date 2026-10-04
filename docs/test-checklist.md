@@ -141,7 +141,7 @@ image, a cancel brought the thumbnail back, and a swipe still dismissed it.
 
 ## Polish
 
-- [ ] Region: while dragging, a `W × H` label follows the pointer (physical pixels, same as the saved PNG), flipping near the edges.
+- [ ] Region: while dragging, a square-cornered `W × H` label follows the pointer (physical pixels, same as the saved PNG), flipping near the edges.
 - [ ] Shift locks the dimension you move first; Alt grows from the centre; Space held moves the selection, and after letting go resizing continues without a jump; Space before a drag still switches to window mode.
 - [ ] `[capture] window_shadow = true`: window shots get a soft shadow following the rounded corners; preview, clipboard and file all have it.
 - [ ] Each shot is a two-hit "ka-chunk" (macOS-like) with a metallic clatter that grows from shot 2; shots in quick succession play sounds 1 → 5 getting faster and brighter, then 6, 7, 6, 7 (a climbing bell arpeggio over a glide) rising endlessly; every shot about as loud; after a 5 s pause it starts at 1 again. `valw __combo-demo` plays the whole sequence for tuning.

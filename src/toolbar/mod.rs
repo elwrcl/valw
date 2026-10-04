@@ -380,7 +380,7 @@ impl Pill {
             (PILL.0 as f64 * self.scale).round() as u32,
             (PILL.1 as f64 * self.scale).round() as u32,
         );
-        let pixmap = draw::pill((pw, ph), self.scale as f32, &self.text);
+        let pixmap = draw::pill((pw, ph), self.scale as f32, &self.text, draw::RADIUS);
         let Ok((buffer, canvas)) = self.pool.create_buffer(
             pw as i32,
             ph as i32,
