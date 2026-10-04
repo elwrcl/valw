@@ -74,6 +74,8 @@ pub struct Zoom {
     pointer: (f64, f64),
     /// Last pointer position while the left button pans.
     panning: Option<(f64, f64)>,
+    /// The latest pointer enter's serial: cursor shapes are set with it.
+    enter_serial: Option<u32>,
     flashlight: bool,
     /// Flashlight radius in logical px.
     radius: f64,
@@ -134,6 +136,7 @@ pub fn run(
         step: config.scroll_step,
         pointer: (0.0, 0.0),
         panning: None,
+        enter_serial: None,
         flashlight: false,
         radius: config.flashlight_radius,
         ctrl: false,
@@ -236,32 +239,26 @@ impl Zoom {
                 continue;
             }
             let p = (event.position.0 * self.ratio, event.position.1 * self.ratio);
+            if let (Some(device), Some((serial, shape))) = (
+                cursor,
+                cursor_change(self.enter_serial, &event.kind, self.panning.is_some()),
+            ) {
+                device.set_shape(serial, shape);
+            }
             match event.kind {
                 PointerEventKind::Enter { serial } => {
-                    if let Some(device) = cursor {
-                        device.set_shape(serial, self::cursor(self.panning.is_some()));
-                    }
+                    self.enter_serial = Some(serial);
                     self.pointer = p;
                 }
                 PointerEventKind::Press {
-                    button: BTN_LEFT,
-                    serial,
-                    ..
+                    button: BTN_LEFT, ..
                 } => {
                     self.panning = Some(p);
-                    if let Some(device) = cursor {
-                        device.set_shape(serial, self::cursor(true));
-                    }
                 }
                 PointerEventKind::Release {
-                    button: BTN_LEFT,
-                    serial,
-                    ..
+                    button: BTN_LEFT, ..
                 } => {
                     self.panning = None;
-                    if let Some(device) = cursor {
-                        device.set_shape(serial, self::cursor(false));
-                    }
                 }
                 PointerEventKind::Motion { .. } => {
                     self.pointer = p;
@@ -320,6 +317,26 @@ impl Zoom {
     }
 }
 
+/// The cursor shape a pointer event calls for, with the serial to set it
+/// with. The protocol wants the latest enter's serial: niri ignores a
+/// release's, and the hand would stay after a drag.
+fn cursor_change(
+    enter: Option<u32>,
+    kind: &PointerEventKind,
+    panning: bool,
+) -> Option<(u32, Shape)> {
+    match kind {
+        PointerEventKind::Enter { serial } => Some((*serial, cursor(panning))),
+        PointerEventKind::Press {
+            button: BTN_LEFT, ..
+        } => Some((enter?, cursor(true))),
+        PointerEventKind::Release {
+            button: BTN_LEFT, ..
+        } => Some((enter?, cursor(false))),
+        _ => None,
+    }
+}
+
 /// The pointer over a zoom: a magnifier, so it reads as zoom mode, and a
 /// grabbing hand while dragging the view.
 fn cursor(panning: bool) -> Shape {
@@ -333,6 +350,32 @@ fn cursor(panning: bool) -> Shape {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_changes_use_the_enter_serial() {
+        let enter = PointerEventKind::Enter { serial: 5 };
+        let press = PointerEventKind::Press {
+            time: 0,
+            button: BTN_LEFT,
+            serial: 9,
+        };
+        let release = PointerEventKind::Release {
+            time: 0,
+            button: BTN_LEFT,
+            serial: 12,
+        };
+        assert_eq!(cursor_change(None, &enter, false), Some((5, Shape::ZoomIn)));
+        assert_eq!(
+            cursor_change(Some(5), &press, true),
+            Some((5, Shape::Grabbing))
+        );
+        assert_eq!(
+            cursor_change(Some(5), &release, false),
+            Some((5, Shape::ZoomIn)),
+            "a release's serial is ignored by the compositor"
+        );
+        assert_eq!(cursor_change(None, &press, true), None, "no enter yet");
+    }
 
     #[test]
     fn the_cursor_says_zoom_and_grabs_while_dragging() {
