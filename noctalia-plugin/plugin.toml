@@ -1,0 +1,34 @@
+# valw for Noctalia: a bar button, the toolbar as a Noctalia panel and a
+# control-center tile. Thin clients of the valw CLI: the choices live in
+# valw's own toolbar.toml (`valw toolbar --state` / `--set`), captures run
+# through `valw toolbar --run` and `valw region`.
+
+id = "elars/valw"
+name = "valw"
+version = "0.1.0"
+plugin_api = 3
+author = "elars"
+license = "MIT"
+dependencies = ["valw"]
+tags = ["screenshot", "capture"]
+icon = "camera"
+description = "macOS-style screenshots with valw: a bar button, a toolbar panel and a control-center tile."
+
+# Left click: the toolbar panel. Right click: a region shot.
+[[widget]]
+id = "bar"
+entry = "bar.luau"
+
+[[panel]]
+id = "toolbar"
+entry = "panel.luau"
+width = 360
+height = 220
+placement = "attached"
+position = "auto"
+open_near_click = true
+
+# Click: a region shot. Right click: the toolbar panel.
+[[shortcut]]
+id = "tile"
+entry = "shortcut.luau"

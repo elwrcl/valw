@@ -48,6 +48,10 @@
             ]
           }
           install -Dm644 assets/fonts/LICENSE-DejaVu $out/share/licenses/valw/LICENSE-DejaVu
+          # The Noctalia plugin (programs.valw.noctalia), without its tests.
+          mkdir -p $out/share/valw
+          cp -r noctalia-plugin $out/share/valw/noctalia-plugin
+          rm -r $out/share/valw/noctalia-plugin/tests
         '';
 
         # dlopen()ed at run time: libwayland (winit, valw), libxkbcommon (winit),

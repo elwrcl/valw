@@ -1,0 +1,8 @@
+{
+  "bar": { "tooltip": "Ekran görüntüsü" },
+  "tile": { "label": "Ekran görüntüsü" },
+  "panel": { "unavailable": "valw bulunamadı" },
+  "mode": { "screen": "Ekran", "region": "Bölge", "window": "Pencere", "zoom": "Yakınlaştır" },
+  "timer": { "label": "Zamanlayıcı", "off": "Kapalı" },
+  "option": { "cursor": "İmleci göster", "preview": "Önizlemeyi göster", "sound": "Ses çal" }
+}

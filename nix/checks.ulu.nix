@@ -88,6 +88,33 @@
             }/testBuildFailure.log
             touch $out
           '';
+        # The plugin as packaged: manifest, every entry present, Luau that
+        # compiles, translations that parse; and its logic against stubbed
+        # Noctalia globals.
+        noctalia-plugin =
+          pkgs.runCommand "valw-noctalia-plugin"
+            {
+              nativeBuildInputs = [
+                pkgs.jq
+                pkgs.luau
+              ];
+            }
+            ''
+              dir=${valw}/share/valw/noctalia-plugin
+              grep -qx 'id = "elars/valw"' $dir/plugin.toml
+              test "$(grep -c '^entry = ' $dir/plugin.toml)" -eq 3
+              for entry in $(sed -n 's/^entry = "\(.*\)"$/\1/p' $dir/plugin.toml); do
+                test -f $dir/$entry
+              done
+              test ! -e $dir/tests
+              luau-compile --null $dir/*.luau
+              for f in $dir/translations/*.json; do jq empty $f; done
+              cp -r ${../noctalia-plugin} plugin
+              chmod -R u+w plugin
+              sh plugin/tests/run.sh
+              touch $out
+            '';
+
         clippy = cargoCheck "clippy" [ pkgs.clippy ] "cargo clippy --all-targets --offline -- -D warnings";
         nextest = cargoCheck "nextest" [ pkgs.cargo-nextest ] "cargo nextest run --offline";
 
