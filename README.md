@@ -1,6 +1,6 @@
 # valw
 
-valw is desktop helper for 3N' [nixos] (https://nixos.org/) [niri](https://github.com/YaLTeR/niri) [noctalia](https://github.com/noctalia-dev/noctalia)
+valw is desktop helper for 3N' [nixos](https://nixos.org/) [niri](https://github.com/YaLTeR/niri) [noctalia](https://github.com/noctalia-dev/noctalia)
 
 ## installation
 
