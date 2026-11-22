@@ -229,7 +229,7 @@ fn keeps_no_log(command: &Command) -> bool {
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Doctor => doctor::run(),
-        Command::Backdrop => backdrop::run(),
+        Command::Backdrop => backdrop::run(config::load(&config::default_path())?.theme.style),
         Command::PreviewHost => host::run(),
         Command::Screen { all, common } => capture(Mode::Screen { all }, common),
         Command::Region { common } => capture(Mode::Region, common),
@@ -326,7 +326,11 @@ fn capture(mode: Mode, common: Common) -> Result<()> {
             let chosen = if pick {
                 None
             } else {
-                let window = picker::run(&mut wl, &outputs[focused_output(&outputs)])?;
+                let window = picker::run(
+                    &mut wl,
+                    &outputs[focused_output(&outputs)],
+                    config.theme.style,
+                )?;
                 // While the picker had the keyboard, niri showed every window
                 // as inactive; give the chosen one a moment to redraw active.
                 std::thread::sleep(Duration::from_millis(150));

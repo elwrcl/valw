@@ -21,6 +21,7 @@ use wayland_client::{
 };
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 
+use crate::config::Style;
 use crate::lock::Lock;
 use crate::theme::gl::{Frame, Paint};
 use crate::theme::{Pacer, Palette, Step};
@@ -69,6 +70,15 @@ pub fn ease(from: &Palette, to: &Palette, since: Duration) -> Palette {
     from.lerp(to, since.as_secs_f32() / EASE.as_secs_f32())
 }
 
+/// The colours to ease to when the overview shows the backdrop again: the
+/// wallpaper's for `paint`, Noctalia's (at its dark/light mode) for `nier`.
+fn refresh_palette(style: Style, connector: &str) -> Option<Palette> {
+    match style {
+        Style::Paint => wallpaper_palette(connector),
+        Style::Nier => Some(crate::theme::current()),
+    }
+}
+
 /// The wallpaper's palette on `connector`, if Noctalia tells us one.
 fn wallpaper_palette(connector: &str) -> Option<Palette> {
     let path = crate::theme::wallpaper(connector)?;
@@ -99,22 +109,26 @@ struct Surface {
     /// A wallpaper palette being worked out on a thread.
     incoming: Option<mpsc::Receiver<Option<Palette>>>,
     pacer: Pacer,
+    style: Style,
 }
 
-#[derive(Default)]
 pub struct Backdrop {
     surfaces: Vec<Surface>,
+    style: Style,
 }
 
 /// Runs until the compositor goes away. A second instance exits at once.
-pub fn run() -> Result<()> {
+pub fn run(style: Style) -> Result<()> {
     let path = crate::lock::default_path().with_file_name("valw-backdrop.lock");
     let Ok(_lock) = Lock::acquire(&path) else {
         tracing::info!("another backdrop is running");
         return Ok(());
     };
     let mut wl = Wayland::connect()?;
-    wl.state.backdrop = Some(Backdrop::default());
+    wl.state.backdrop = Some(Backdrop {
+        surfaces: Vec::new(),
+        style,
+    });
     let qh = wl.queue.handle();
     for output in wl.outputs() {
         add(&mut wl.state, &qh, &output.wl);
@@ -152,6 +166,7 @@ pub fn add(state: &mut State, qh: &QueueHandle<State>, output: &WlOutput) {
     tracing::info!("backdrop on {}", info.geom.name);
     let palette = crate::theme::current();
     if let Some(b) = &mut state.backdrop {
+        let style = b.style;
         b.surfaces.push(Surface {
             paint: None,
             layer,
@@ -166,6 +181,7 @@ pub fn add(state: &mut State, qh: &QueueHandle<State>, output: &WlOutput) {
             changed: now,
             incoming: None,
             pacer: Pacer::new(DRAW_EVERY),
+            style,
         });
     }
 }
@@ -207,7 +223,7 @@ impl Backdrop {
         s.viewport.set_destination(w as i32, h as i32);
         match &mut s.paint {
             Some(paint) => paint.resize(px),
-            None => match Paint::new(conn, s.layer.wl_surface(), px) {
+            None => match Paint::new(conn, s.layer.wl_surface(), px, s.style) {
                 Ok(paint) => s.paint = Some(paint),
                 Err(e) => {
                     tracing::warn!("no backdrop on {}: {e:#}", s.name);
@@ -238,8 +254,9 @@ impl Surface {
         if self.visibility.frame(now) && self.incoming.is_none() {
             let (tx, rx) = mpsc::channel();
             let name = self.name.clone();
+            let style = self.style;
             std::thread::spawn(move || {
-                let _ = tx.send(wallpaper_palette(&name));
+                let _ = tx.send(refresh_palette(style, &name));
             });
             self.incoming = Some(rx);
         }
@@ -247,8 +264,8 @@ impl Surface {
             && let Ok(result) = rx.try_recv()
         {
             match &result {
-                Some(p) => tracing::info!("backdrop on {}: wallpaper palette {p:?}", self.name),
-                None => tracing::info!("backdrop on {}: no wallpaper palette", self.name),
+                Some(p) => tracing::info!("backdrop on {}: palette {p:?}", self.name),
+                None => tracing::info!("backdrop on {}: no palette", self.name),
             }
             if let Some(palette) = result {
                 self.from = ease(&self.from, &self.to, now - self.changed);
@@ -322,6 +339,16 @@ mod tests {
             refreshes(&[16, 3000, 16, 16]),
             [true, false, false, true, false]
         );
+    }
+
+    #[test]
+    fn nier_ignores_the_wallpaper() {
+        // never the wallpaper, never None: whatever noctalia says, or DEFAULT
+        assert_eq!(
+            refresh_palette(Style::Nier, "no-such-output"),
+            Some(crate::theme::current())
+        );
+        assert_eq!(refresh_palette(Style::Paint, "no-such-output"), None);
     }
 
     #[test]

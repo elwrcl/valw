@@ -14,6 +14,7 @@ pub struct Config {
     pub zoom: Zoom,
     pub editor: Editor,
     pub sound: Sound,
+    pub theme: Theme,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -53,6 +54,23 @@ impl Default for Zoom {
             flashlight_radius: 180.0,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[serde(default)]
+pub struct Theme {
+    pub style: Style,
+}
+
+/// The background behind the overview and the window picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Style {
+    /// Liquid paint in the wallpaper's (picker: the window icon's) colours.
+    #[default]
+    Paint,
+    /// NieR-style grid, drifting squares and scan band in Noctalia's colours.
+    Nier,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
@@ -311,6 +329,14 @@ mod tests {
             err.to_string(),
             "sound.combo_reset_secs must be between 1 and 60"
         );
+    }
+
+    #[test]
+    fn theme_style_default_and_values() {
+        assert_eq!(Config::default().theme.style, Style::Paint);
+        let (config, _) = parse("[theme]\nstyle = \"nier\"\n").unwrap();
+        assert_eq!(config.theme.style, Style::Nier);
+        assert!(parse("[theme]\nstyle = \"neon\"\n").is_err());
     }
 
     #[test]

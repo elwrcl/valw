@@ -86,6 +86,9 @@ flashlight_radius = 180
 [editor]
 backend = "builtin"   # or "satty","noctalia" choose which one is for you.
 
+[theme]
+style = "paint"   # or "nier": Noctalia-coloured NieR background
+
 [sound]
 enabled = true
 volume = 0.9

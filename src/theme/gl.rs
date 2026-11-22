@@ -8,6 +8,7 @@ use khronos_egl as egl;
 use wayland_client::{Connection, Proxy, protocol::wl_surface::WlSurface};
 
 use super::Palette;
+use crate::config::Style;
 use crate::zoom::gl::{Egl, config, open};
 
 const VERTEX: &str = "#version 300 es
@@ -19,6 +20,15 @@ void main() {
 ";
 
 const FRAGMENT: &str = include_str!("paint.frag");
+const NIER: &str = include_str!("nier.frag");
+
+/// The fragment shader drawing `style`.
+fn fragment(style: Style) -> &'static str {
+    match style {
+        Style::Paint => FRAGMENT,
+        Style::Nier => NIER,
+    }
+}
 
 /// What one frame shows.
 #[derive(Debug, Clone, Copy)]
@@ -60,7 +70,12 @@ pub struct Paint {
 
 impl Paint {
     /// A GL surface of `size` buffer px on `surface`.
-    pub fn new(conn: &Connection, surface: &WlSurface, size: (u32, u32)) -> Result<Paint> {
+    pub fn new(
+        conn: &Connection,
+        surface: &WlSurface,
+        size: (u32, u32),
+        style: Style,
+    ) -> Result<Paint> {
         let (egl, display) = open(conn)?;
         egl.bind_api(egl::OPENGL_ES_API)
             .context("no OpenGL ES in EGL")?;
@@ -90,7 +105,7 @@ impl Paint {
                     .map_or(std::ptr::null(), |f| f as *const _)
             })
         };
-        let (u, overlay) = unsafe { setup(&gl, size)? };
+        let (u, overlay) = unsafe { setup(&gl, size, fragment(style))? };
         Ok(Paint {
             gl,
             u,
@@ -191,12 +206,16 @@ impl Drop for Paint {
 }
 
 /// Compiles the program and returns its uniforms and the overlay texture.
-unsafe fn setup(gl: &glow::Context, size: (u32, u32)) -> Result<(Uniforms, glow::Texture)> {
+unsafe fn setup(
+    gl: &glow::Context,
+    size: (u32, u32),
+    fragment: &str,
+) -> Result<(Uniforms, glow::Texture)> {
     unsafe {
         let program = gl.create_program().map_err(|e| anyhow!(e))?;
         for (kind, source) in [
             (glow::VERTEX_SHADER, VERTEX),
-            (glow::FRAGMENT_SHADER, FRAGMENT),
+            (glow::FRAGMENT_SHADER, fragment),
         ] {
             let shader = gl.create_shader(kind).map_err(|e| anyhow!(e))?;
             gl.shader_source(shader, source);
@@ -256,26 +275,44 @@ unsafe fn setup(gl: &glow::Context, size: (u32, u32)) -> Result<(Uniforms, glow:
 mod tests {
     use super::*;
 
+    const UNIFORMS: [&str; 10] = [
+        "res",
+        "t",
+        "motion",
+        "speed",
+        "scale",
+        "c1",
+        "c2",
+        "c3",
+        "overlay",
+        "use_overlay",
+    ];
+
+    /// `setup` looks every uniform up, and GLSL drops unused ones, so each
+    /// shader must declare and use all of them.
     #[test]
-    fn shader_declares_its_uniforms() {
-        for name in [
-            "res",
-            "t",
-            "motion",
-            "speed",
-            "scale",
-            "c1",
-            "c2",
-            "c3",
-            "overlay",
-            "use_overlay",
-        ] {
-            assert!(
-                FRAGMENT
-                    .lines()
-                    .any(|l| l.starts_with("uniform") && l.contains(&format!(" {name};"))),
-                "{name} missing"
-            );
+    fn every_shader_declares_and_uses_the_uniforms() {
+        for (name, src) in [("paint", FRAGMENT), ("nier", NIER)] {
+            for u in UNIFORMS {
+                assert!(
+                    src.lines()
+                        .any(|l| l.starts_with("uniform") && l.contains(&format!(" {u};"))),
+                    "{name}: {u} not declared"
+                );
+                assert!(
+                    src.lines()
+                        .filter(|l| !l.starts_with("uniform"))
+                        .any(|l| l.contains(u)),
+                    "{name}: {u} unused"
+                );
+            }
         }
+    }
+
+    #[test]
+    fn style_picks_the_shader() {
+        assert_ne!(FRAGMENT, NIER);
+        assert_eq!(fragment(Style::Paint), FRAGMENT);
+        assert_eq!(fragment(Style::Nier), NIER);
     }
 }

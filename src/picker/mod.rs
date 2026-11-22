@@ -30,6 +30,7 @@ use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 
 use self::layout::Rect;
+use crate::config::Style;
 use crate::editor::text;
 use crate::error::{Cancelled, HintExt};
 use crate::theme::gl::{Frame, Paint};
@@ -70,10 +71,22 @@ pub struct Picker {
     shift: bool,
     outcome: Option<Option<usize>>,
     error: Option<anyhow::Error>,
+    style: Style,
+}
+
+/// A card's colours: its icon's for `paint`, Noctalia's for `nier` (every
+/// card the same, so moving between cards keeps one calm background).
+fn card_palette(style: Style, icon: Option<&image::RgbaImage>) -> Palette {
+    match style {
+        Style::Paint => icon
+            .map(|i| crate::theme::from_image(i, true))
+            .unwrap_or(Palette::DEFAULT),
+        Style::Nier => crate::theme::current(),
+    }
 }
 
 /// Shows the picker on `output` and returns the chosen window.
-pub fn run(wl: &mut Wayland, output: &Output) -> Result<Window> {
+pub fn run(wl: &mut Wayland, output: &Output, style: Style) -> Result<Window> {
     let windows = crate::niri::mru(crate::niri::windows()?);
     anyhow::ensure!(!windows.is_empty(), "there are no windows to capture");
     let px = (ICON as f64 * output.scale).round() as u32;
@@ -83,10 +96,7 @@ pub fn run(wl: &mut Wayland, output: &Output) -> Result<Window> {
         .map(|window| {
             let app_id = window.app_id.clone().unwrap_or_default();
             let image = icons::find(&app_id, &dirs).and_then(|p| icons::load(&p, px));
-            let palette = image
-                .as_ref()
-                .map(|i| crate::theme::from_image(i, true))
-                .unwrap_or(Palette::DEFAULT);
+            let palette = card_palette(style, image.as_ref());
             Card {
                 title: window.title.clone().unwrap_or_default(),
                 app: app_id,
@@ -142,6 +152,7 @@ pub fn run(wl: &mut Wayland, output: &Output) -> Result<Window> {
         shift: false,
         outcome: None,
         error: None,
+        style,
     });
     let result = wl.dispatch_blocking(|s| {
         s.picker
@@ -217,7 +228,7 @@ impl Picker {
         self.viewport.set_destination(w as i32, h as i32);
         match &mut self.paint {
             Some(paint) => paint.resize(px),
-            None => match Paint::new(conn, self.layer.wl_surface(), px) {
+            None => match Paint::new(conn, self.layer.wl_surface(), px, self.style) {
                 Ok(paint) => self.paint = Some(paint),
                 Err(e) => {
                     self.error = Some(e.context("could not start OpenGL ES for the picker"));
@@ -471,6 +482,24 @@ fn centred(p: &mut Pixmap, s: &str, size: f32, cx: f32, cy: f32, color: [u8; 4])
             FillRule::Winding,
             Transform::identity(),
             None,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nier_cards_share_the_noctalia_palette() {
+        let icon = image::RgbaImage::from_pixel(8, 8, image::Rgba([255, 0, 0, 255]));
+        assert_eq!(
+            card_palette(Style::Nier, Some(&icon)),
+            crate::theme::current()
+        );
+        assert_ne!(
+            card_palette(Style::Paint, Some(&icon)),
+            crate::theme::current()
         );
     }
 }
